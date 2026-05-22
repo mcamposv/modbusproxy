@@ -9,6 +9,8 @@
             "name": "PlatformIO",
             "includePath": [
                 "/home/guybrush/gitrepos/github/mcamposv/modbusproxy/src",
+                "/home/guybrush/.platformio/packages/framework-arduinoespressif32/libraries/Ethernet/src",
+                "/home/guybrush/.platformio/packages/framework-arduinoespressif32/libraries/WiFi/src",
                 "/home/guybrush/gitrepos/github/mcamposv/modbusproxy/.pio/libdeps/esp32dev/Adafruit SH110X",
                 "/home/guybrush/gitrepos/github/mcamposv/modbusproxy/.pio/libdeps/esp32dev/Adafruit GFX Library",
                 "/home/guybrush/gitrepos/github/mcamposv/modbusproxy/.pio/libdeps/esp32dev/Adafruit BusIO",
@@ -218,7 +220,6 @@
                 "/home/guybrush/.platformio/packages/framework-arduinoespressif32/libraries/EEPROM/src",
                 "/home/guybrush/.platformio/packages/framework-arduinoespressif32/libraries/ESP32/src",
                 "/home/guybrush/.platformio/packages/framework-arduinoespressif32/libraries/ESPmDNS/src",
-                "/home/guybrush/.platformio/packages/framework-arduinoespressif32/libraries/Ethernet/src",
                 "/home/guybrush/.platformio/packages/framework-arduinoespressif32/libraries/FFat/src",
                 "/home/guybrush/.platformio/packages/framework-arduinoespressif32/libraries/FS/src",
                 "/home/guybrush/.platformio/packages/framework-arduinoespressif32/libraries/HTTPClient/src",
@@ -238,7 +239,6 @@
                 "/home/guybrush/.platformio/packages/framework-arduinoespressif32/libraries/USB/src",
                 "/home/guybrush/.platformio/packages/framework-arduinoespressif32/libraries/Update/src",
                 "/home/guybrush/.platformio/packages/framework-arduinoespressif32/libraries/WebServer/src",
-                "/home/guybrush/.platformio/packages/framework-arduinoespressif32/libraries/WiFi/src",
                 "/home/guybrush/.platformio/packages/framework-arduinoespressif32/libraries/WiFiClientSecure/src",
                 "/home/guybrush/.platformio/packages/framework-arduinoespressif32/libraries/WiFiProv/src",
                 ""
@@ -247,6 +247,8 @@
                 "limitSymbolsToIncludedHeaders": true,
                 "path": [
                     "/home/guybrush/gitrepos/github/mcamposv/modbusproxy/src",
+                    "/home/guybrush/.platformio/packages/framework-arduinoespressif32/libraries/Ethernet/src",
+                    "/home/guybrush/.platformio/packages/framework-arduinoespressif32/libraries/WiFi/src",
                     "/home/guybrush/gitrepos/github/mcamposv/modbusproxy/.pio/libdeps/esp32dev/Adafruit SH110X",
                     "/home/guybrush/gitrepos/github/mcamposv/modbusproxy/.pio/libdeps/esp32dev/Adafruit GFX Library",
                     "/home/guybrush/gitrepos/github/mcamposv/modbusproxy/.pio/libdeps/esp32dev/Adafruit BusIO",
@@ -456,7 +458,6 @@
                     "/home/guybrush/.platformio/packages/framework-arduinoespressif32/libraries/EEPROM/src",
                     "/home/guybrush/.platformio/packages/framework-arduinoespressif32/libraries/ESP32/src",
                     "/home/guybrush/.platformio/packages/framework-arduinoespressif32/libraries/ESPmDNS/src",
-                    "/home/guybrush/.platformio/packages/framework-arduinoespressif32/libraries/Ethernet/src",
                     "/home/guybrush/.platformio/packages/framework-arduinoespressif32/libraries/FFat/src",
                     "/home/guybrush/.platformio/packages/framework-arduinoespressif32/libraries/FS/src",
                     "/home/guybrush/.platformio/packages/framework-arduinoespressif32/libraries/HTTPClient/src",
@@ -476,7 +477,6 @@
                     "/home/guybrush/.platformio/packages/framework-arduinoespressif32/libraries/USB/src",
                     "/home/guybrush/.platformio/packages/framework-arduinoespressif32/libraries/Update/src",
                     "/home/guybrush/.platformio/packages/framework-arduinoespressif32/libraries/WebServer/src",
-                    "/home/guybrush/.platformio/packages/framework-arduinoespressif32/libraries/WiFi/src",
                     "/home/guybrush/.platformio/packages/framework-arduinoespressif32/libraries/WiFiClientSecure/src",
                     "/home/guybrush/.platformio/packages/framework-arduinoespressif32/libraries/WiFiProv/src",
                     ""

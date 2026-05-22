@@ -50,10 +50,10 @@ utilizara la pantalla oled para mostrar la informacion y un teclado de 4 pulsado
 el programa sera parametrizable mediante variables al comienzo del mismo.
 Tendra variables para configurar lo siguiente:
 wifi o ethernet.
-en caso de wifi los datos de conexion.
+en caso de wifi los datos de conexion. Los datos sensibles: datos de la wifi, direcciones ip y puertos como la conexion wifi se configuraran en secrets.h
 dhcp o ip fija y especificar la configuracion de la misma
 se especificara la direccion ip del servidor modbus tcp de destino, el puerto.
-
+rotate screen (que permitira invertir la orientacion de la pantalla 180 grados)
 La funcionalidad principal es hacer de proxy entre Modbus TCP
 es decir podra gestionar diferentes conexiones en paralelo escuchando,
 reenviando las solicitudes Modbus TCP entrantes al dispositivo conocido como "servidor modbus tcp"
@@ -71,6 +71,8 @@ el numero de clientes conectados actualmente
 mediante el menu de los botones permitira listar los clientes y ver sus estadisticas.
 los botones seran + - back y ok para navegar por el menu y seleccionar opciones.
 Permitira por los menus tambien hacer una peticion de prueba al servidor modbus tcp para verificar su estado y mostrar la respuesta en la pantalla.
+Genera todos los ficheros incluidos el .gitignore para evitar que suba el secrets.h a git. genera un secrets.h.template como ejemplo.
+
 
 
 
