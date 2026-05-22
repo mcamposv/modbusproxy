@@ -1,0 +1,78 @@
+    
+📋 RESUMEN TÉCNICO: PROYECTO MODBUS PROXY
+
+--- 1. DIMENSIONES FÍSICAS (Para la caja 3D) ---
+* Pantalla OLED (Controlador SH110X):
+  - Placa base (PCB negra) -> Ancho: [  ] mm | Alto: [  ] mm
+  - Cristal visible -> Ancho: [  ] mm | Alto: [  ] mm
+  - Distancia entre centros de los agujeros para tornillos: [  ] mm
+
+* Botones (4 unidades):
+  - Diámetro/Ancho de la parte que el dedo pulsa: [  ] mm
+  - Altura total del botón (desde la base hasta la punta): [  ] mm
+  - Disposición deseada en la caja (Ej: en cruz a la derecha, en línea debajo de la pantalla...): [  ]
+
+* Placas Microcontroladoras:
+  - ESP32 Actual (30 pines) -> Ancho: [  ] mm | Largo: [  ] mm 
+  - ESP32 Futura (WT32-ETH01) -> Ancho: [  ] mm | Largo: [  ] mm
+  - Ubicación del agujero para el cable USB en la caja: [  ]
+
+--- 2. MAPEO DE PINES (Hardware Validado) ---
+* I2C Pantalla: SDA = 33 | SCL = 32
+* Botón OK: D4 (Pull-up por software)
+* Botón BACK: D14 (Pull-up por software)
+* Botón [+]: D15 (Pull-up por software)
+* Botón [-]: D34 (Pull-up por hardware, arnés a 3V3)
+
+--- 3. CONECTIVIDAD (Para el código Modbus v0.1) ---
+* SSID (Red WiFi): [  ]
+* Password WiFi: [  ]
+* IP del Servidor/Autómata Modbus TCP destino: [  ]
+* Puerto Modbus destino (Normalmente 502): [  ]
+
+creame un programa para el ESP32 que funcione como un proxy Modbus TCP
+el hardware es:
+WT32-ETH01
+y ESP32 de 30 pines.
+* Pantalla OLED:
+  - Controlador confirmado: SH1106
+  - Resolución: 128x64 píxeles
+  - Dirección I2C: 0x3C
+  - I2C Pantalla: SDA = 33 | SCL = 32
+  - Librerías requeridas en PlatformIO: Adafruit GFX Library y Adafruit SH110X
+los botones estan conectados
+Botón OK: D4 (Pull-up por software)
+* Botón BACK: D14 (Pull-up por software)
+* Botón [+]: D15 (Pull-up por software)
+* Botón [-]: D34 (Pull-up por hardware, arnés a 3V3)
+
+utilizara la pantalla oled para mostrar la informacion y un teclado de 4 pulsadores para interacturar con un menu
+el programa sera parametrizable mediante variables al comienzo del mismo.
+Tendra variables para configurar lo siguiente:
+wifi o ethernet.
+en caso de wifi los datos de conexion.
+dhcp o ip fija y especificar la configuracion de la misma
+se especificara la direccion ip del servidor modbus tcp de destino, el puerto.
+
+La funcionalidad principal es hacer de proxy entre Modbus TCP
+es decir podra gestionar diferentes conexiones en paralelo escuchando,
+reenviando las solicitudes Modbus TCP entrantes al dispositivo conocido como "servidor modbus tcp"
+debe gestionar las colas para serialiar las llamadas y evitar conflictos entre las solicitudes entrantes y las respuestas del dispositivo Modbus.
+y enviar las respuestas al peticionario correcto.
+
+debera guardar estadisticas en el tiempo de ejecucion de:
+numero de clientes, sus ips, estadisticas de peticiones por dispositivo, hora de ultima peticion por dispositivo.
+
+La pantalla mostrara en su estado en reposo:
+la ip asignada al esp32
+el estado de la conexion con el servidor modbus tcp (conectado/desconectado)
+el numero de clientes conectados actualmente
+
+mediante el menu de los botones permitira listar los clientes y ver sus estadisticas.
+los botones seran + - back y ok para navegar por el menu y seleccionar opciones.
+Permitira por los menus tambien hacer una peticion de prueba al servidor modbus tcp para verificar su estado y mostrar la respuesta en la pantalla.
+
+
+
+
+
