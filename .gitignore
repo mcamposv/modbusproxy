@@ -1,0 +1,14 @@
+# Basura de compilación de PlatformIO
+.pio/
+.vscode/
+*.egg-info
+
+# ARCHIVO SECRETO CON CONTRASEÑAS (¡NUNCA SUBIR A GITHUB!)
+src/secrets.h
+
+# Archivos temporales de sistema o compilación local
+.DS_Store
+Thumbs.db
+*.o
+*.elf
+*.bin
