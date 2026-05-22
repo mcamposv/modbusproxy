@@ -28,7 +28,7 @@ IPAddress targetModbusIP;
 const int BOTON_OK    = 4;
 const int BOTON_BACK  = 14;
 const int BOTON_MAS   = 15;
-const int BOTON_MENOS = 34; 
+const int BOTON_MENOS = 39; 
 
 #define DIRECCION_I2C 0x3C
 #define ANCHO_PANTALLA 128
