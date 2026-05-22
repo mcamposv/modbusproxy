@@ -10,6 +10,7 @@
             "includePath": [
                 "/home/guybrush/gitrepos/github/mcamposv/modbusproxy/src",
                 "/home/guybrush/.platformio/packages/framework-arduinoespressif32/libraries/Ethernet/src",
+                "/home/guybrush/gitrepos/github/mcamposv/modbusproxy/.pio/libdeps/esp32dev/ESP32Ping",
                 "/home/guybrush/.platformio/packages/framework-arduinoespressif32/libraries/WiFi/src",
                 "/home/guybrush/gitrepos/github/mcamposv/modbusproxy/.pio/libdeps/esp32dev/Adafruit SH110X",
                 "/home/guybrush/gitrepos/github/mcamposv/modbusproxy/.pio/libdeps/esp32dev/Adafruit GFX Library",
@@ -248,6 +249,7 @@
                 "path": [
                     "/home/guybrush/gitrepos/github/mcamposv/modbusproxy/src",
                     "/home/guybrush/.platformio/packages/framework-arduinoespressif32/libraries/Ethernet/src",
+                    "/home/guybrush/gitrepos/github/mcamposv/modbusproxy/.pio/libdeps/esp32dev/ESP32Ping",
                     "/home/guybrush/.platformio/packages/framework-arduinoespressif32/libraries/WiFi/src",
                     "/home/guybrush/gitrepos/github/mcamposv/modbusproxy/.pio/libdeps/esp32dev/Adafruit SH110X",
                     "/home/guybrush/gitrepos/github/mcamposv/modbusproxy/.pio/libdeps/esp32dev/Adafruit GFX Library",
