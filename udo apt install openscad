@@ -1,0 +1,27 @@
+[32mkicad-packages3d[0m/stable,stable 9.0.2-1 all
+  3D models for 3D viewer in KiCad's Pcbnew and Footprint Editor
+
+[32mopenscad[0m/stable 2021.01-8 amd64
+  script file based graphical CAD environment
+
+[32mopenscad-mcad[0m/stable,stable 2019.05-1 all
+  library for the OpenSCAD 3D modeling software
+
+[32mopenscad-testing[0m/stable 2021.01-8 amd64
+  script file based graphical CAD environment (test suite)
+
+[32mopenscad-testing-data[0m/stable,stable 2021.01-8 all
+  script file based graphical CAD environment (test suite data)
+
+[32mpcb-rnd[0m/stable 3.1.6-1 amd64
+  Standard installation of pcb-rnd
+
+[32mpcb-rnd-export[0m/stable 3.1.6-1 amd64
+  Common export plugins.
+
+[32mpng23d[0m/stable 1.10-3 amd64
+  convierte imágenes PNG en representaciones tridimensionales.
+
+[32mturbocase[0m/stable,stable 1.8.0-2 all
+  Generate OpenSCAD case template from a KiCad PCB
+

@@ -1,0 +1,6 @@
+pulsadores:
+12x12x4mm
+patalla:
+exterior 33,7mmx35,4mmxx2,9mm
+cristal: 23mmx35,12x12x4mm
+agujeros: 30,6 x 28,5 x 3mm

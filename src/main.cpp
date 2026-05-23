@@ -14,10 +14,14 @@ const bool USE_ETHERNET       = false;
 const bool USE_DHCP           = true;   
 const bool ROTATE_SCREEN      = false;  
 
-const uint8_t MODBUS_FIXED_ID = 2;      // Actualizado por si lo pruebas a mano
-const uint16_t MODBUS_TEST_REG = 30070; // Registro infalible: Model ID (1 byte)
+const uint8_t MODBUS_FIXED_ID = 2;      
+const uint16_t MODBUS_TEST_REG = 30070; 
 const uint32_t RECONNECT_DELAY = 5000;  
 // ====================================================================
+
+// Máquina de estados para el canal TCP
+enum BackendState { BK_WAITING, BK_STANDBY, BK_CONNECTED, BK_CON_ERR };
+BackendState currentBackendState = BK_WAITING;
 
 IPAddress local_IP(192, 168, 254, 211);
 IPAddress gateway(192, 168, 254, 252);
@@ -53,7 +57,7 @@ ClientStats trackedClients[MAX_TRACKED_IPS];
 
 enum MenuState {
     MENU_IDLE, MENU_MAIN, MENU_CLIENTS_LIST, MENU_CLIENTS_DETAIL,
-    MENU_TEST_PING, MENU_TEST_FIXED, MENU_TEST_SCAN        
+    MENU_TEST_PING, MENU_TEST_FIXED, MENU_TEST_SCAN, MENU_SHUTDOWN        
 };
 MenuState currentMenuState = MENU_IDLE; 
 int currentMenuOption = 0; 
@@ -74,6 +78,7 @@ void renderUI();
 void ejecutarTestPing();
 void ejecutarTestModbusFijo();
 void ejecutarEscanerModbus();
+void ejecutarApagado();
 int getActiveClientCount();
 
 void setup() {
@@ -90,7 +95,7 @@ void setup() {
     display.setTextColor(SH110X_WHITE);
     display.setCursor(0, 10);
     display.println("INICIANDO PROXY...");
-    display.println("Modbus TCP v1.7 (HA)"); 
+    display.println("Modbus TCP v1.8 (HA)"); 
     display.display();
 
     if (USE_ETHERNET) {
@@ -126,13 +131,18 @@ bool readExact(WiFiClient &client, uint8_t* buffer, size_t length, uint32_t time
 void updateClientStats(IPAddress ip) {
     for (int i = 0; i < MAX_TRACKED_IPS; i++) {
         if (trackedClients[i].isUsed && trackedClients[i].ip == ip) {
-            trackedClients[i].requestCount++; trackedClients[i].lastRequestTimestamp = millis() / 1000; return;
+            trackedClients[i].requestCount++; 
+            trackedClients[i].lastRequestTimestamp = millis() / 1000; 
+            return;
         }
     }
     for (int i = 0; i < MAX_TRACKED_IPS; i++) {
         if (!trackedClients[i].isUsed) {
-            trackedClients[i].ip = ip; trackedClients[i].requestCount = 1;
-            trackedClients[i].lastRequestTimestamp = millis() / 1000; trackedClients[i].isUsed = true; return;
+            trackedClients[i].ip = ip; 
+            trackedClients[i].requestCount = 1;
+            trackedClients[i].lastRequestTimestamp = millis() / 1000; 
+            trackedClients[i].isUsed = true; 
+            return;
         }
     }
 }
@@ -150,7 +160,12 @@ void taskModbusProxy(void *parameter) {
             WiFiClient newClient = proxyServer.available();
             bool slotFound = false;
             for (int i = 0; i < MAX_CLIENTS; i++) {
-                if (!clients[i] || !clients[i].connected()) { clients[i] = newClient; slotFound = true; break; }
+                if (!clients[i] || !clients[i].connected()) { 
+                    clients[i] = newClient; 
+                    updateClientStats(newClient.remoteIP()); 
+                    slotFound = true; 
+                    break; 
+                }
             }
             if (!slotFound) newClient.stop();
         }
@@ -172,7 +187,11 @@ void taskModbusProxy(void *parameter) {
                                     if (!backendClient.connected()) {
                                         if (millis() - lastBackendConnectAttempt >= RECONNECT_DELAY || lastBackendConnectAttempt == 0) {
                                             lastBackendConnectAttempt = millis();
-                                            backendClient.connect(targetModbusIP, MODBUS_SERVER_PORT);
+                                            if (backendClient.connect(targetModbusIP, MODBUS_SERVER_PORT)) {
+                                                currentBackendState = BK_CONNECTED;
+                                            } else {
+                                                currentBackendState = BK_CON_ERR; 
+                                            }
                                         }
                                     }
 
@@ -192,7 +211,10 @@ void taskModbusProxy(void *parameter) {
                                                 }
                                                 delete[] resPdu;
                                             }
-                                        } else { backendClient.stop(); }
+                                        } else { 
+                                            backendClient.stop(); 
+                                            currentBackendState = BK_STANDBY; 
+                                        }
                                     }
                                     xSemaphoreGive(backendMutex); 
                                 }
@@ -203,6 +225,21 @@ void taskModbusProxy(void *parameter) {
                 }
             }
         }
+        
+        int activeClients = getActiveClientCount();
+        if (activeClients == 0) {
+            if (backendClient.connected()) {
+                xSemaphoreTake(backendMutex, portMAX_DELAY);
+                backendClient.stop();
+                xSemaphoreGive(backendMutex);
+            }
+            currentBackendState = BK_WAITING;
+        } else {
+            if (!backendClient.connected() && currentBackendState != BK_CON_ERR) {
+                currentBackendState = BK_STANDBY;
+            }
+        }
+        
         delay(2); 
     }
 }
@@ -226,19 +263,20 @@ void handleNavigation() {
         case MENU_IDLE:
             if (okPressed) { currentMenuState = MENU_MAIN; currentMenuOption = 0; } break;
         case MENU_MAIN:
-            if (masPressed) currentMenuOption = (currentMenuOption + 1) % 4;
-            if (menosPressed) currentMenuOption = (currentMenuOption - 1 + 4) % 4;
+            if (menosPressed) currentMenuOption = (currentMenuOption + 1) % 5;
+            if (masPressed) currentMenuOption = (currentMenuOption - 1 + 5) % 5;
             if (backPressed) currentMenuState = MENU_IDLE;
             if (okPressed) {
                 if (currentMenuOption == 0) { currentMenuState = MENU_CLIENTS_LIST; selectedClientIdx = 0; } 
                 else if (currentMenuOption == 1) { currentMenuState = MENU_TEST_PING; diagnosticResult = "OK:Iniciar Test"; } 
                 else if (currentMenuOption == 2) { currentMenuState = MENU_TEST_FIXED; diagnosticResult = "OK p/ ID " + String(MODBUS_FIXED_ID); } 
                 else if (currentMenuOption == 3) { currentMenuState = MENU_TEST_SCAN; diagnosticResult = "OK:Iniciar Scan"; }
+                else if (currentMenuOption == 4) { currentMenuState = MENU_SHUTDOWN; diagnosticResult = "OK:Confirmar"; }
             } break;
         case MENU_CLIENTS_LIST:
             if (totalTracked > 0) {
-                if (masPressed) selectedClientIdx = (selectedClientIdx + 1) % totalTracked;
-                if (menosPressed) selectedClientIdx = (selectedClientIdx - 1 + totalTracked) % totalTracked;
+                if (menosPressed) selectedClientIdx = (selectedClientIdx + 1) % totalTracked;
+                if (masPressed) selectedClientIdx = (selectedClientIdx - 1 + totalTracked) % totalTracked;
             }
             if (backPressed) currentMenuState = MENU_MAIN;
             if (okPressed && totalTracked > 0) currentMenuState = MENU_CLIENTS_DETAIL; break;
@@ -250,59 +288,147 @@ void handleNavigation() {
             if (backPressed) currentMenuState = MENU_MAIN; if (okPressed) ejecutarTestModbusFijo(); break;
         case MENU_TEST_SCAN:
             if (backPressed) currentMenuState = MENU_MAIN; if (okPressed) ejecutarEscanerModbus(); break;
+        case MENU_SHUTDOWN:
+            if (backPressed) currentMenuState = MENU_MAIN; if (okPressed) ejecutarApagado(); break;
     }
 }
 
 void renderUI() {
     display.clearDisplay();
+    display.setTextSize(1);
+    
+    auto printBottom = [](String left, String right) {
+        display.setCursor(0, 56); 
+        display.print(left);
+        display.setCursor(128 - (right.length() * 6), 56); 
+        display.print(right);
+    };
+
     String ipStr = "Conectando...";
+    bool tieneNet = false;
+    
     if (USE_ETHERNET) {
-        if (ETH.localIP() != IPAddress(0,0,0,0)) ipStr = ETH.localIP().toString();
+        if (ETH.localIP() != IPAddress(0,0,0,0)) {
+            ipStr = ETH.localIP().toString();
+            tieneNet = true;
+        }
     } else {
-        if (WiFi.status() == WL_CONNECTED) ipStr = WiFi.localIP().toString();
+        if (WiFi.status() == WL_CONNECTED) {
+            ipStr = WiFi.localIP().toString();
+            tieneNet = true;
+        }
         else if (WiFi.status() == WL_NO_SSID_AVAIL) ipStr = "Sin SSID WiFi";
         else ipStr = "Desconectado";
     }
-    bool backendCon = backendClient.connected(); int activeSockets = getActiveClientCount();
+    
+    int activeSockets = getActiveClientCount();
+    int totalTracked = 0;
+    for (int i = 0; i < MAX_TRACKED_IPS; i++) if (trackedClients[i].isUsed) totalTracked++;
 
     switch (currentMenuState) {
-        case MENU_IDLE:
-            display.setTextSize(1); display.setCursor(0, 0); display.println("=== PROXY MODBUS ===");
+        case MENU_IDLE: {
+            display.setCursor(0, 0); display.println("PROXY MODBUS");
             display.setCursor(0, 18); display.print("IP: "); display.println(ipStr);
-            display.setCursor(0, 32); display.print("Server: "); display.println(backendCon ? "CONECTADO" : "OFFLINE");
-            display.setCursor(0, 46); display.print("Clientes: "); display.println(activeSockets);
-            display.setCursor(0, 56); display.print("[ OK:Menu ]"); break;
-        case MENU_MAIN:
-            display.setCursor(0, 0); display.println("--- MENU PRINCIPAL ---");
-            display.setCursor(2, 14); display.print(currentMenuOption == 0 ? "> " : "  "); display.println("1. Historial IPs");
-            display.setCursor(2, 24); display.print(currentMenuOption == 1 ? "> " : "  "); display.println("2. Test Ping Red");
-            display.setCursor(2, 34); display.print(currentMenuOption == 2 ? "> " : "  "); display.println("3. Modbus Fijo");
-            display.setCursor(2, 44); display.print(currentMenuOption == 3 ? "> " : "  "); display.println("4. Escaner Auto-HA");
-            display.setCursor(0, 56); display.print("+-:Mover OK:Entrar"); break;
+            
+            String serverStatus = "WAITING";
+            if (!tieneNet) {
+                serverStatus = "OFFLINE";
+            } else if (currentBackendState == BK_WAITING) {
+                serverStatus = "WAITING";
+            } else if (currentBackendState == BK_STANDBY) {
+                serverStatus = "STANDBY";
+            } else if (currentBackendState == BK_CONNECTED) {
+                serverStatus = "CONNECTED";
+            } else if (currentBackendState == BK_CON_ERR) {
+                serverStatus = "CON-ERR";
+            }
+            
+            display.setCursor(0, 32); display.print("Server: "); display.println(serverStatus);
+            display.setCursor(0, 46); display.print("Clientes: "); 
+            display.print(activeSockets); display.print("/"); display.println(totalTracked);
+            printBottom("", "OK:Menu"); 
+            break;
+        }   
+        case MENU_MAIN: {
+            display.setCursor(0, 0); display.println("MENU PRINCIPAL");
+            
+            const char* menuItems[] = {
+                "1. Historial IPs", 
+                "2. Test Ping Red", 
+                "3. Modbus Fijo", 
+                "4. Escaner Auto-HA", 
+                "5. Apagar Proxy"
+            };
+            
+            int startIdx = (currentMenuOption >= 4) ? 1 : 0; 
+            
+            for(int i = 0; i < 4; i++) {
+                int itemIdx = startIdx + i;
+                display.setCursor(2, 14 + (i * 10)); 
+                display.print(currentMenuOption == itemIdx ? "> " : "  "); 
+                display.println(menuItems[itemIdx]);
+            }
+            
+            printBottom("+-:Mover", "OK:Entrar"); 
+            break; 
+        }
         case MENU_CLIENTS_LIST: {
-            display.println("--- HISTORIAL IPS ---");
-            int totalTracked = 0; int mappings[MAX_TRACKED_IPS];
-            for (int i = 0; i < MAX_TRACKED_IPS; i++) if (trackedClients[i].isUsed) mappings[totalTracked++] = i;
-            if (totalTracked == 0) { display.setCursor(0, 28); display.println(" Sin IPs registradas"); display.setCursor(0, 56); display.print("BACK:Atras"); } 
-            else { display.setCursor(0, 26); display.print(" -> "); display.println(trackedClients[mappings[selectedClientIdx]].ip.toString()); display.setCursor(0, 56); display.print("OK:Ver " + String(selectedClientIdx+1) + "/" + String(totalTracked)); }
+            display.setCursor(0, 0); display.println("HISTORIAL IPS");
+            int mappings[MAX_TRACKED_IPS];
+            int currentMapped = 0;
+            for (int i = 0; i < MAX_TRACKED_IPS; i++) if (trackedClients[i].isUsed) mappings[currentMapped++] = i;
+            
+            if (totalTracked == 0) { 
+                display.setCursor(0, 28); display.println("Sin IPs registradas"); 
+                printBottom("BACK:Atras", ""); 
+            } else { 
+                display.setCursor(0, 26); display.print(" -> "); display.println(trackedClients[mappings[selectedClientIdx]].ip.toString()); 
+                String rightTxt = "OK:Ver " + String(selectedClientIdx+1) + "/" + String(totalTracked);
+                printBottom("BACK:Atras", rightTxt); 
+            }
             break; }
+            
         case MENU_CLIENTS_DETAIL: {
-            display.println("--- METRICAS IP ---");
-            int totalTracked = 0; int mappings[MAX_TRACKED_IPS];
-            for (int i = 0; i < MAX_TRACKED_IPS; i++) if (trackedClients[i].isUsed) mappings[totalTracked++] = i;
+            display.setCursor(0, 0); display.println("DETALLES IP");
+            int mappings[MAX_TRACKED_IPS];
+            int currentMapped = 0;
+            for (int i = 0; i < MAX_TRACKED_IPS; i++) if (trackedClients[i].isUsed) mappings[currentMapped++] = i;
+            
             if (totalTracked > 0 && selectedClientIdx < totalTracked) {
                 ClientStats sc = trackedClients[mappings[selectedClientIdx]];
+                uint32_t currentUptime = millis() / 1000;
+                uint32_t elapsedSeconds = currentUptime - sc.lastRequestTimestamp;
+                
                 display.setCursor(0, 16); display.print("IP: "); display.println(sc.ip.toString());
                 display.setCursor(0, 30); display.print("Peticiones: "); display.println(sc.requestCount);
-                display.setCursor(0, 44); display.print("Ult. segs: "); display.println(sc.lastRequestTimestamp);
+                display.setCursor(0, 44); display.print("Hace: "); display.print(elapsedSeconds); display.println(" segs");
             }
-            display.setCursor(0, 56); display.print("BACK:Atras"); break; }
+            printBottom("BACK:Atras", ""); 
+            break; }
+            
         case MENU_TEST_PING:
-            display.println("--- TEST PING ICMP ---"); display.setCursor(0, 26); display.println(diagnosticResult); display.setCursor(0, 56); display.print("OK:Test BACK:Salir"); break;
+            display.setCursor(0, 0); display.println("TEST PING ICMP"); 
+            display.setCursor(0, 26); display.println(diagnosticResult); 
+            printBottom("BACK:Salir", "OK:Test"); 
+            break;
+            
         case MENU_TEST_FIXED:
-            display.println("--- MODBUS FIJO ---"); display.setCursor(0, 20); display.println(diagnosticResult); display.setCursor(0, 56); display.print("OK:Test BACK:Salir"); break;
+            display.setCursor(0, 0); display.println("MODBUS FIJO"); 
+            display.setCursor(0, 20); display.println(diagnosticResult); 
+            printBottom("BACK:Salir", "OK:Test"); 
+            break;
+            
         case MENU_TEST_SCAN:
-            display.println("--- ESCANER AUTO-HA ---"); display.setCursor(0, 26); display.println(diagnosticResult); display.setCursor(0, 56); display.print("OK:Scan BACK:Salir"); break;
+            display.setCursor(0, 0); display.println("ESCANER AUTO-HA"); 
+            display.setCursor(0, 26); display.println(diagnosticResult); 
+            printBottom("BACK:Salir", "OK:Scan"); 
+            break;
+            
+        case MENU_SHUTDOWN:
+            display.setCursor(0, 0); display.println("APAGAR PROXY"); 
+            display.setCursor(0, 26); display.println(diagnosticResult); 
+            printBottom("BACK:Salir", "OK:Aceptar"); 
+            break;
     }
     display.display();
 }
@@ -342,13 +468,12 @@ void ejecutarTestModbusFijo() {
             } else { diagnosticResult = "Timeout sin respuesta"; }
             backendClient.stop();
         } else { diagnosticResult = "Fallo TCP IP:502"; }
+        currentBackendState = BK_STANDBY;
         xSemaphoreGive(backendMutex);
     } else { diagnosticResult = "Canal Bus Bloqueado"; }
 }
 
-// TEST 4: Escáner Autodescubrimiento (Copia la lógica de Home Assistant)
 void ejecutarEscanerModbus() {
-    // Escaneamos la misma lista que usa la librería oficial huawei_solar
     uint8_t idsAProbar[] = {1, 2, 3, 0, 16, 100, 255}; 
     bool idEncontrado = false; 
     uint8_t idExitoso = 0; 
@@ -367,7 +492,6 @@ void ejecutarEscanerModbus() {
             if (backendClient.connected()) backendClient.stop();
             
             if (backendClient.connect(targetModbusIP, MODBUS_SERVER_PORT)) {
-                // Inyectamos el registro 30070 (0x75 0x76), el que no falla nunca
                 uint8_t reqFrame[] = { 
                     0x00, 0x01, 0x00, 0x00, 0x00, 0x06, 
                     idActual, 0x03, 0x75, 0x76, 0x00, 0x01 
@@ -383,7 +507,6 @@ void ejecutarEscanerModbus() {
                         uint8_t* resPdu = new uint8_t[pduLen];
                         
                         if (readExact(backendClient, resPdu, pduLen, 1000)) {
-                            // Si responde con 0x03, ignoramos las Excepciones y cantamos victoria
                             if (resPdu[0] == 0x03) { 
                                 valorDetectado = (resPdu[2] << 8) | resPdu[3];
                                 idExitoso = idActual;
@@ -398,6 +521,7 @@ void ejecutarEscanerModbus() {
             if (idEncontrado) break; 
             delay(200); 
         }
+        currentBackendState = BK_STANDBY;
         xSemaphoreGive(backendMutex);
 
         if (idEncontrado) { 
@@ -409,4 +533,44 @@ void ejecutarEscanerModbus() {
         diagnosticResult = "Canal Bus Bloqueado"; 
     }
 }
-// === FIN ===
+
+void ejecutarApagado() {
+    diagnosticResult = "Cerrando TCP..."; 
+    renderUI();
+    
+    // 1. Cerrar conexión con la EMMA ordenadamente (envía paquete FIN)
+    if (xSemaphoreTake(backendMutex, pdMS_TO_TICKS(2000)) == pdTRUE) {
+        if (backendClient.connected()) {
+            backendClient.stop(); 
+        }
+        xSemaphoreGive(backendMutex);
+    }
+    
+    // 2. Apagar el servidor y cerrar clientes (Home Assistant)
+    proxyServer.end(); 
+    for (int i = 0; i < MAX_CLIENTS; i++) {
+        if (clients[i] && clients[i].connected()) {
+            clients[i].stop();
+        }
+    }
+    
+    // 3. Dar tiempo al stack de red para mandar los paquetes de cierre reales
+    delay(500); 
+    
+    // 4. Pantalla de APAGADO SEGURO
+    display.clearDisplay();
+    display.setTextSize(2); 
+    display.setTextColor(SH110X_WHITE);
+    display.setCursor(18, 20);
+    display.println("APAGADO");
+    
+    display.setTextSize(1);
+    display.setCursor(6, 45);
+    display.println("Seguro desconectar");
+    display.display();
+    
+    // 5. HALT: Congelar el microcontrolador en un bucle infinito
+    while(true) {
+        delay(1000); 
+    }
+}
