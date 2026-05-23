@@ -2,6 +2,7 @@ import socket
 import time
 
 # --- CONFIGURACIÓN ---
+#IP_PROXY = "192.168.1.100" # EMMA Directa
 IP_PROXY = "192.168.1.101" # Asegúrate de que es la IP de tu ESP32
 PUERTO = 502
 
