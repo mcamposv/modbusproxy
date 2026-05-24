@@ -846,7 +846,7 @@ void ejecutarTestModbusFijo() {
 }
 
 void ejecutarEscanerModbus() {
-    uint8_t idsAProbar[] = {1, 2, 3, 0, 16, 100, 255}; 
+    uint8_t idsAProbar[] = {0, 1, 2, 3, 6, 16, 100, 255}; 
     bool idEncontrado = false; 
     uint8_t idExitoso = 0; 
     String textoDetectado = "";

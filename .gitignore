@@ -3,6 +3,7 @@
 .vscode/
 *.egg-info
 3d_design/*.gcode
+repomix-output.xml
 
 # ARCHIVO SECRETO CON CONTRASEÑAS (¡NUNCA SUBIR A GITHUB!)
 src/secrets.h
