@@ -1,8 +1,8 @@
-# 🔋 ESP32 Modbus TCP Proxy & Multiplexer for Huawei EMMA & SUN2000
+# 🔋 ESP32 Modbus TCP Proxy & Multiplexer for Huawei EMMA & SUN2000 (v3.2)
 
-Este repositorio contiene el firmware definitivo para un dispositivo basado en **ESP32** (compatible con conexión WiFi o Ethernet WT32-ETH01) que actúa como una **pasarela, proxy intermedio y multiplexor de conexiones Modbus TCP** de grado industrial. 
+Este repositorio contiene el firmware de grado industrial desarrollado para **ESP32** (compatible con conexión WiFi o Ethernet nativa mediante controladores como el LAN8720/WT32-ETH01). El dispositivo actúa como un **escudo de red, proxy transparente bajo demanda (On-Demand) y multiplexor de canales Modbus TCP**.
 
-Está diseñado específicamente para solucionar la limitación crítica de los ecosistemas de energía **Huawei (SmartHEMS / EMMA / Inversores SUN2000)**, los cuales solo permiten **un único cliente concurrente** en su puerto `502`, bloqueando o baneando por DDoS a cualquier otro dispositivo secundario que intente leer métricas simultáneamente.
+Su propósito fundamental es solucionar de forma definitiva el problema crítico de bloqueo y baneo por DDoS en los ecosistemas residenciales e industriales de **Huawei (SmartGuard / EMMA / Inversores SUN2000)**, los cuales tienen un firmware estricto que solo tolera **un único cliente TCP concurrente en el puerto 502**, tirando la conexión o aplicando listas negras si Home Assistant, cargadores de vehículos eléctricos (ej: V2C) o sistemas de analítica locales intentan leer métricas simultáneamente.
 
 ---
 
@@ -32,9 +32,9 @@ El ESP32 se sitúa estratégicamente en la red local como un escudo y distribuid
 
 ## 🚀 Historial de Versiones y Novedades
 
-### 🟢 Versión 3.0 (Actual)
+### 🟢 Versión 3.2 (Actual)
 
-* **API REST JSON:** Implementación de un endpoint dedicado (`http://<IP_ESP32>/api/status`) que devuelve la telemetría del proxy, contadores de clientes y diagnóstico en formato JSON puro, ideal para integraciones externas y monitorización remota.
+* **API REST JSON:** Implementación de un endpoint dedicado (`http://<IP_ESP32>/api/status`) que devuelve la telemetría del proxy, contadores de clientes y diagnóstico en formato JSON puro.
 * **Integridad Atómica Estricta:** El protocolo de primado inicial ha sido refinado para pedir bloques exactos de 15 registros al consultar el modelo de la EMMA, evitando excepciones `0x03` y respetando al milímetro las reglas de memoria de Huawei.
 
 ### 🔵 Versión 2.0
@@ -45,24 +45,61 @@ El ESP32 se sitúa estratégicamente en la red local como un escudo y distribuid
 
 ---
 
-## ✨ Características Principales
+## ⚙️ Opciones de Configuración del Código (src/main.cpp)
 
-* **Multiplexación Concurrente Segura:** Permite conectar hasta 4 clientes Modbus TCP simultáneos (ej: Home Assistant y scripts de analítica locales corriendo al mismo milisegundo) gestionando las peticiones en cola mediante semáforos mutex (`SemaphoreHandle_t`).
-* **Arquitectura Asíncrona Dual-Core:** El motor del proxy Modbus corre de forma aislada en el **Core 0** de FreeRTOS para garantizar latencias mínimas y evitar cortes en la red, mientras que la interfaz gráfica (OLED) y los botones corren de forma independiente en el **Core 1**.
-* **Conexiones Persistentes Inteligentes ("Lazy Connections"):** El ESP32 no bombardea a la EMMA por iniciativa propia. Solo abre el canal hacia Huawei bajo demanda cuando recibe una petición entrante legítima. Si hay tráfico continuo (como el de Home Assistant), mantiene el túnel abierto de forma ultra-eficiente.
+El comportamiento completo de la placa y la pila de red se administra mediante variables estáticas parametrizables situadas en la parte superior del archivo `src/main.cpp`:
+
+* `USE_ETHERNET` (`const bool`): `false` para usar la antena interna WiFi del ESP32. `true` para enrutar todo el tráfico por cable físico usando la pila Ethernet nativa (ej: LAN8720).
+* `USE_DHCP` (`const bool`): `true` para solicitar una IP dinámica al router de la vivienda. `false` para forzar la IP estática de rescate configurada en el firmware.
+* `ROTATE_SCREEN` (`const bool`): `true` aplica un giro físico de 180 grados a la visualización del OLED SH1106. `false` mantiene la orientación estándar.
+* `MODBUS_FIXED_ID` (`const uint8_t`): Identificador de Unidad (Unit ID) utilizado para el test de arranque y primado inicial (Por defecto `0`, correspondiente a la EMMA).
+* `MODBUS_TEST_REG` (`const uint16_t`): Dirección del registro Modbus consultado durante el test de vida del arranque (`30000`, Model Name ASCII).
+* `RECONNECT_DELAY` (`const uint32_t`): Tiempo de espera en milisegundos (`5000` ms) que aplica el proxy antes de reintentar una conexión contra el puerto 502 de Huawei si el socket se rompe, evitando baneos por reintentos infinitos en ráfaga (Anti-DDoS).
 
 ---
 
-## 💻 Interfaces de Control y Monitorización
+## 🛡️ Lógica de Arranque y Chequeos de Red (Doble Peaje)
 
-### 1. Endpoint API JSON (`/api/status`)
+Para garantizar que Home Assistant o cualquier cliente secundario jamás provoquen un baneo en el cortafuegos de Huawei, el proxy implementa un **"Doble Peaje de Seguridad"** asíncrono gestionado por la máquina de estados del backend en el Core 0. Hasta que la placa no supera con éxito ambos peajes, el puerto público `502` del proxy permanece cerrado para el exterior:
 
-Se puede consultar el estado interno del proxy mediante una llamada GET que devuelve un objeto estructurado para herramientas automatizadas:
+### Peaje 1: El Test de Ping ICMP (Capa 3)
+
+* Nada más obtener red local, el proxy entra en el estado `BK_STARTUP_PING`. Lanza ráfagas de pings ICMP directos a la IP configurada de Huawei (`MODBUS_SERVER_IP`).
+* Si el host no responde (porque la EMMA se está reiniciándose o el enlace físico está caído), el sistema transiciona a `BK_PING_ERR`, bloquea el servidor local y muestra una cuenta atrás de **30 segundos** antes de volver a comprobarlo. Esto evita saturar de sockets TCP a un equipo que está apagado o incomunicado.
+
+### Peaje 2: El Primado Atómico Modbus (Capa 4 / Capa 7)
+
+* **La inyección quirúrgica:** Abre un único socket TCP hacia el puerto 502 de Huawei e inyecta la trama hexadecimal exacta pidiendo leer 15 registros desde la dirección 30000.
+* **El porqué de los 15 registros (Integridad Atómica):** Huawei exige integridad atómica en la lectura de sus cadenas de texto (Strings). El nombre del modelo en el registro 30000 ocupa exactamente 15 registros (30 bytes). Si un cliente le pide una longitud menor (como 10 registros), el firmware de Huawei considera que se está fragmentando una variable indivisible y responde con un código de error de datos `0x03`. Al pedir la longitud exacta de 15, la comunicación se realiza de forma limpia.
+* **Criterio de Vida Inteligente (Detector de Excepciones):** El proxy analiza el código de función devuelto. Si recibe un éxito (`0x03` o `0x04`), extrae los bytes del texto (ej: `SmartHEMS`) y libera la pasarela. Pero si el equipo responde con un código de excepción de error legítimo de Huawei (`0x83` o `0x84`), el proxy **da por superado el peaje igualmente**. Esto es debido a que un dispositivo que responde con una excepción Modbus oficial es un equipo activo, libre y cuyo cortafuegos está escuchando perfectamente.
+
+Una vez superados ambos peajes, el estado cambia a `BK_WAITING` y se abren las compuertas para Home Assistant.
+
+---
+
+## 💻 Panel de Control Web (Dashboard HTTP)
+
+El dispositivo levanta un servidor web en el puerto estándar `80` que se refresca automáticamente cada 5 segundos mediante código inline para ofrecer un entorno de monitorización centralizado desde cualquier navegador ingresando en `http://<IP_ESP32>/`. El dashboard incluye:
+
+* **Estado del Servidor:** Muestra con códigos de colores semafóricos el estado real del túnel hacia la EMMA (`STANDBY` en naranja, `CONNECTED` en verde, `CON-ERR`/`PING ERROR` en rojo).
+* **Información de Hardware:** Refleja el string del dispositivo identificado (ej: `SmartHEMS` o `SmartHEMS (Forzado por Excepcion)`) y el recuento de conexiones TCP activas de clientes sobre el total permitido (`X / 4`).
+* **Caja Naranja de Depuración del Primado Inicial:** Un bloque visual crítico que se muestra si la comprobación inicial está activa, detallando el número total de intentos de conexión, la fase de control de texto exacta (ej: *"Leyendo cuerpo de datos PDU"*), la última trama Hexadecimal enviada, la última trama Hexadecimal recibida del bus y el diagnóstico descriptivo del último error en caso de fallo.
+* **Historial Dinámico de IPs Clientes:** Una tabla estructurada que registra las últimas 10 direcciones IP únicas que han atacado el proxy Modbus, sumando el total acumulado de peticiones por cliente y calculando de forma elástica cuántos segundos hace que enviaron su última trama.
+* **Apagado Seguro:** Un botón rojo destacado que llama al endpoint `/apagar`, cerrando todos los sockets abiertos con Huawei de forma ordenada para liberar inmediatamente el slot de la EMMA antes de desconectar físicamente el ESP32.
+
+---
+
+## 📊 Monitorización remota vía API REST JSON
+
+Para permitir integraciones nativas con sistemas externos o crear sensores de diagnóstico dedicados en Home Assistant, el firmware expone un endpoint JSON optimizado de solo lectura en la ruta:
+👉 `GET http://<IP_ESP32>/api/status`
+
+La respuesta se genera concatenando buffers en memoria para eliminar el uso de librerías pesadas de terceros, garantizando una respuesta en microsegundos bajo la estructura estándar:
 
 ```json
 {
-  "uptime_seconds": 1450,
-  "backend_state": "WAITING",
+  "uptime_seconds": 3245,
+  "backend_state": "CONNECTED",
   "device_model": "SmartHEMS",
   "active_clients": 1,
   "max_clients": 4,
@@ -73,65 +110,41 @@ Se puede consultar el estado interno del proxy mediante una llamada GET que devu
 
 ```
 
-### 2. Panel Web (Dashboard HTTP)
-
-Accediendo a la IP del proxy desde cualquier navegador (`http://<IP_ESP32>/`), se dispone de una vista en vivo con auto-refresco que muestra las IPs rastreadas, el tiempo activo, la depuración hexadecimal Modbus del arranque y un botón de apagado seguro.
-
-### 3. Pantalla Principal y Menú OLED (Local)
-
-La pantalla refleja en tiempo real el pulso de la instalación (`Server: CONECTADO`, clientes activos). Pulsando el botón **OK**, se accede al menú físico de herramientas forenses:
-
-1. **Historial IPs:** Muestra las últimas IPs conectadas y tiempo transcurrido.
-2. **Test Ping Red:** Lanza un ping ICMP para verificar la conexión física.
-3. **Modbus Fijo:** Inyecta una petición directa para testear respuestas de software de la EMMA.
-4. **Escaner Auto-HA:** Imita la fuerza bruta de Home Assistant para detectar qué IDs responden, de forma controlada y pausada.
-
 ---
 
-## 🕵️ Hallazgos de Ingeniería Inversa en el Ecosistema Huawei
+## 🎛 ... Manual del Menú de Hardware e Interfaz OLED (Local)
 
-Durante el desarrollo y la auditoría de tráfico con este proxy, se descubrió la topología exacta del bus interno RS485 gestionado por la EMMA:
+En su estado en reposo (`MENU_IDLE`), el OLED SH1106 muestra la IP local del proxy, el estado de conexión del backend, el nombre del modelo detectado y el contador de sockets (`X/4`). Al pulsar el botón **OK**, el dispositivo suspende el renderizado de reposo y entra en el menú de diagnóstico avanzado navegable con los botones **[+]**, **[-]** y **[BACK]**:
 
-* **ID 00 (SmartHEMS / EMMA):** Responde en el registro de texto `30000` devolviendo la cadena de caracteres `SmartHEMS`. Exige una longitud estricta de 15 registros. No cuenta con mapa de registros de inversor.
-* **ID 06 (Inversor SUN2000-10K-LC0):** La EMMA desplaza automáticamente al inversor principal a la dirección física **ID 6**. Responde con éxito al registro de texto `30000` (`SUN2000-10K-LC0`) y al registro universal de identificación `30070`.
-* **Cuentas Vacías (IDs 1, 2, 3, etc.):** Si se intenta consultar un ID no asignado, la EMMA actúa como pasarela e intercepta la trama devolviendo un código de error Modbus oficial de Excepción **`0x83` con código `04` (Slave Device Failure)**.
-* **Corrección de Longitud PDU (Bug Off-By-One):** El firmware corrige un comportamiento del estándar Modbus TCP de Huawei donde la longitud restante devuelta en la cabecera MBAP incluye el Unit ID. El código resta dicho byte (`rLen - 1`) para evitar que el búfer TCP se congele.
+### 1. Historial IPs
 
----
+* **Funcionalidad:** Muestra una lista secuencial de todas las direcciones IP de los clientes registrados que han enviado tramas al dispositivo.
+* **Operación:** Al seleccionar una IP con el botón **OK**, desglosa la dirección IP, el número total de consultas acumuladas y el tiempo transcurrido en segundos desde que envió su última petición Modbus.
 
-## ⚙️ Configuración del Entorno y Despliegue
+### 2. Test Ping Red
 
-### 1. Dependencias en `platformio.ini`
+* **Funcionalidad:** Fuerza una auditoría instantánea en Capa 3 contra la EMMA ignorando la máquina de estados general.
+* **Operación:** Lanza 3 paquetes de pings ICMP asíncronos. Si el host responde, imprime en pantalla `PING OK!` junto con el tiempo medio de respuesta en milisegundos (`Tiempo: X ms`). Si falla, imprime `PING FALLIDO! Host Inalcanzable`.
 
-Es estrictamente obligatorio incluir la librería `ESP32Ping` para habilitar el aislamiento ICMP en los menús de diagnóstico:
+### 3. Modbus Fijo
 
-```ini
-lib_deps =
-  adafruit/Adafruit GFX Library @ ^1.11.9
-  adafruit/Adafruit SH110X @ ^2.1.10
-  ESP32Ping
+* **Funcionalidad:** Realiza un test de inyección manual de comandos en Capa 7 hacia el dispositivo destino utilizando los parámetros por defecto de los peajes.
+* **Operación:** Abre un socket manual, inyecta la trama de 15 registros al ID 0, registro 30000, e inspecciona la respuesta en pantalla. Muestra el texto ASCII limpio devuelto por la EMMA o intercepta el código de excepción en formato legible (ej: `Modbus Ok! Respuesta Excepcion Viva`).
 
-```
+### 4. Escaner Auto-HA
 
-### 2. Archivo de Credenciales (`include/secrets.h`)
+* **Funcionalidad:** Modos de búsqueda forense automáticos para mapear el bus RS485/Modbus.
+* **Operación:** Emula el algoritmo de descubrimiento de integraciones de domótica. Recorre de forma secuencial una lista de IDs sospechosos, incluyendo de manera estricta el **ID 00 (SmartHEMS / EMMA)** y el **ID 06 (Inversor SUN2000)** (`0, 1, 2, 3, 6, 16, 100, 255`). Envía a cada uno una petición de lectura de 15 registros al bloque 30000. Para cada ID, abre y cierra el socket de manera estricta y con un retraso deliberado para **burlar el cortafuegos de Huawei**. Si localiza un ID que responde con datos de texto válidos, detiene el bucle, guarda el ID con éxito y muestra el resultado en el OLED (ej: *"ID: 6 Leido: SUN2000-10K-LC0"*).
 
-Declaración automática mediante objetos nativos:
+### 5. Pausar / Reanudar Comms
 
-```cpp
-#define WIFI_SSID "Tu_Nombre_De_WiFi"
-#define WIFI_PASSWORD "Tu_Clave_De_WiFi"
-#define MODBUS_SERVER_IP "<IP_EMMA>" // IP Real de la EMMA de Huawei
-#define MODBUS_SERVER_PORT 502
+* **Funcionalidad:** Interruptor de aislamiento rápido por software (Modo Mantenimiento).
+* **Operación:** Al pulsar **OK** sobre esta opción, el flag global `isPaused` se invierte de estado. Cuando está pausado, el proxy cierra de inmediato el cliente del backend, tira todas las conexiones TCP de los clientes entrantes en el puerto 502 y congela el servicio Modbus, permitiendo al usuario realizar labores de mantenimiento sin que Home Assistant intente reconectar.
 
-```
+### 6. Apagar Proxy
 
-### 3. Configuración en Home Assistant
-
-Para conectar Home Assistant al ecosistema, se debe apuntar la integración oficial directamente hacia este proxy:
-
-* **Host / IP:** `<IP_ESP32>` *(IP asignada a tu ESP32)*
-* **Puerto:** `502`
-* **ID de Esclavo (Slave ID):** `6` *(ID cazado del inversor SUN2000)*
+* **Funcionalidad:** Procedimiento de desmantelamiento y apagado seguro de la electrónica.
+* **Operación:** Al confirmar la selección con **OK**, el ESP32 ejecuta la rutina `ejecutarApagado()`. Desconecta ordenadamente el socket de Huawei, detiene y destruye las instancias del `proxyServer` Modbus y del `webServer` HTTP para liberar los descriptores en red, corta la comunicación de los sockets de clientes activos, borra la pantalla e imprime un cartel estático en letras grandes: **APAGADO - Seguro desconectar**. El procesador entra entonces en un bucle infinito de seguridad para evitar reconexiones involuntarias hasta que se le corte la alimentación eléctrica.
 
 ---
 
@@ -147,5 +160,3 @@ Para conectar Home Assistant al ecosistema, se debe apuntar la integración ofic
 | **Botón MENOS (-)** | GPIO 39 | Entrada digital pura |
 
 ---
-
-*Desarrollado y depurado de forma quirúrgica para la estabilidad energética local.*
