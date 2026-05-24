@@ -1,8 +1,9 @@
-# 🔋 ESP32 Modbus TCP Proxy & Multiplexer for Huawei EMMA & SUN2000 (v3.2)
+```markdown
+# 🔋 ESP32 Modbus TCP Proxy & Multiplexer for Huawei EMMA & SUN2000 (v4.0.0)
 
-Este repositorio contiene el firmware de grado industrial desarrollado para **ESP32** (compatible con conexión WiFi o Ethernet nativa mediante controladores como el LAN8720/WT32-ETH01). El dispositivo actúa como un **escudo de red, proxy transparente bajo demanda (On-Demand) y multiplexor de canales Modbus TCP**.
+Este repositorio contiene el firmware de grado industrial desarrollado para **ESP32** (optimizado para conexión por cable físico mediante la pila Ethernet nativa del chip LAN8720 en placas WT32-ETH01, o mediante su antena WiFi interna). El dispositivo actúa como un **escudo de red, proxy transparente bajo demanda (On-Demand) y multiplexor de canales Modbus TCP**.
 
-Su propósito fundamental es solucionar de forma definitiva el problema crítico de bloqueo y baneo por DDoS en los ecosistemas residenciales e industriales de **Huawei (SmartGuard / EMMA / Inversores SUN2000)**, los cuales tienen un firmware estricto que solo tolera **un único cliente TCP concurrente en el puerto 502**, tirando la conexión o aplicando listas negras si Home Assistant, cargadores de vehículos eléctricos (ej: V2C) o sistemas de analítica locales intentan leer métricas simultáneamente.
+Su propósito fundamental es solucionar de forma definitiva el problema crítico de bloqueo y baneo por DDoS en los ecosistemas residenciales e industriales de **Huawei (SmartGuard / EMMA / Inversores SUN2000)**. Estos equipos cuentan con un firmware estricto que solo tolera **un único cliente TCP concurrente en el puerto 502**, tirando la conexión o aplicando listas negras si Home Assistant, cargadores de vehículos eléctricos (ej: V2C) o sistemas de analítica locales intentan leer métricas de forma simultánea.
 
 ---
 
@@ -32,29 +33,37 @@ El ESP32 se sitúa estratégicamente en la red local como un escudo y distribuid
 
 ## 🚀 Historial de Versiones y Novedades
 
-### 🟢 Versión 3.2 (Actual)
+### 🟢 Versión 4.0.0 (Actual)
 
-* **API REST JSON:** Implementación de un endpoint dedicado (`http://<IP_ESP32>/api/status`) que devuelve la telemetría del proxy, contadores de clientes y diagnóstico en formato JSON puro.
-* **Integridad Atómica Estricta:** El protocolo de primado inicial ha sido refinado para pedir bloques exactos de 15 registros al consultar el modelo de la EMMA, evitando excepciones `0x03` y respetando al milímetro las reglas de memoria de Huawei.
+* **Actualizaciones Inalámbricas Permanentes (OTA):** Inclusión de la pila `ArduinoOTA` en el puerto de red `3232`. Permite flashear nuevas versiones del código a través del cable Ethernet o WiFi de forma remota. Cuenta con una pantalla de carga dedicada en el OLED local que muestra la barra de progreso en tiempo real (`UPDATING (OTA)`) y verificación final de éxito (`SUCCESS!!`).
+* **Seguridad Blindada (Anti-Git):** Sistema de doble autenticación inalámbrica protegido contra filtraciones en repositorios públicos. La contraseña viaja cifrada mediante inyección local en PlatformIO combinando un archivo `secrets.ini` (oculto en `.gitignore`) con las directivas de preprocesador de `secrets.h`.
+* **Menú About Centrado por Píxel:** Nueva pantalla de créditos integrada en la interfaz física. Calcula dinámicamente la longitud de la cadena de caracteres en memoria para centrar de forma exacta la versión del firmware. Rinde homenaje al mítico pirata Guybrush Threepwood.
+* **Apagado Pasivo con Servicios Vivos:** Rediseño total de la subrutina de desmantelamiento seguro. Al pulsar "Apagar Proxy", el núcleo detiene estrictamente toda la comunicación Modbus TCP (liberando el slot de Huawei de inmediato), pero **mantiene vivos los hilos de execution del Servidor Web, la API JSON y el oyente OTA**. El equipo entra en un modo de bajo consumo Modbus sin quedar incomunicado de la red.
+
+### 🟡 Versión 3.2
+
+* **API REST JSON:** Implementación de un endpoint dedicado (`http://<IP_ESP32>/api/status`) que devuelve la telemetría del proxy, contadores de clientes y diagnóstico en formato JSON puro para integraciones externas.
+* **Integridad Atómica Estricta:** El protocolo de primado inicial fue refinado para pedir bloques exactos de 15 registros al consultar el modelo de la EMMA, evitando excepciones de datos y respetando las reglas de memoria de Huawei.
 
 ### 🔵 Versión 2.0
 
-* **Monitorización Web HTTP:** Inclusión de un dashboard accesible vía navegador en el puerto 80 con estadísticas de estado en tiempo real, registro de IPs clientes, y depuración Modbus.
+* **Monitorización Web HTTP:** Inclusión de un dashboard accesible vía navegador en el puerto 80 con estadísticas de estado en tiempo real, registro de IPs clientes y depuración Modbus.
 * **Reensamblador Anti-Fragmentación TCP:** Un motor robusto que detecta paquetes TCP divididos o mutilados por Home Assistant, los junta en el búfer local y los envía a la EMMA de forma limpia y continua.
 * **Escudo de Cuarentena Inteligente:** Antes de abrir la pasarela a los clientes, el ESP32 realiza un **Ping ICMP** seguido de un test de lectura Modbus. Si la EMMA está reiniciándose o no hay red, el proxy bloquea a los clientes (Cuarentena) protegiendo a Huawei de recibir un ataque de denegación de servicio (DDoS) involuntario.
 
 ---
 
-## ⚙️ Opciones de Configuración del Código (src/main.cpp)
+## ⚙️ Opciones de Configuración del Código (src/proxy_operativo.hpp)
 
-El comportamiento completo de la placa y la pila de red se administra mediante variables estáticas parametrizables situadas en la parte superior del archivo `src/main.cpp`:
+El comportamiento completo de la placa y la pila de red se administra mediante variables estáticas parametrizables situadas en la parte superior del archivo principal:
 
-* `USE_ETHERNET` (`const bool`): `false` para usar la antena interna WiFi del ESP32. `true` para enrutar todo el tráfico por cable físico usando la pila Ethernet nativa (ej: LAN8720).
+* `USE_ETHERNET` (`const bool`): `false` para usar la antena interna WiFi del ESP32. `true` para enrutar todo el tráfico por el cable físico usando la pila Ethernet nativa (ej: LAN8720).
 * `USE_DHCP` (`const bool`): `true` para solicitar una IP dinámica al router de la vivienda. `false` para forzar la IP estática de rescate configurada en el firmware.
 * `ROTATE_SCREEN` (`const bool`): `true` aplica un giro físico de 180 grados a la visualización del OLED SH1106. `false` mantiene la orientación estándar.
 * `MODBUS_FIXED_ID` (`const uint8_t`): Identificador de Unidad (Unit ID) utilizado para el test de arranque y primado inicial (Por defecto `0`, correspondiente a la EMMA).
 * `MODBUS_TEST_REG` (`const uint16_t`): Dirección del registro Modbus consultado durante el test de vida del arranque (`30000`, Model Name ASCII).
 * `RECONNECT_DELAY` (`const uint32_t`): Tiempo de espera en milisegundos (`5000` ms) que aplica el proxy antes de reintentar una conexión contra el puerto 502 de Huawei si el socket se rompe, evitando baneos por reintentos infinitos en ráfaga (Anti-DDoS).
+* `FIRMWARE_VERSION` (`const String`): Almacena la versión semántica del programa activo que se renderizará de forma centrada en el menú local.
 
 ---
 
@@ -79,13 +88,13 @@ Una vez superados ambos peajes, el estado cambia a `BK_WAITING` y se abren las c
 
 ## 💻 Panel de Control Web (Dashboard HTTP)
 
-El dispositivo levanta un servidor web en el puerto estándar `80` que se refresca automáticamente cada 5 segundos mediante código inline para ofrecer un entorno de monitorización centralizado desde cualquier navegador ingresando en `http://<IP_ESP32>/`. El dashboard incluye:
+El dispositivo levanta un servidor web en el puerto estándar `80` que se refresca automáticamente cada 5 segundos para ofrecer un entorno de monitorización desde cualquier navegador ingresando en `http://<IP_ESP32>/`. El dashboard incluye:
 
-* **Estado del Servidor:** Muestra con códigos de colores semafóricos el estado real del túnel hacia la EMMA (`STANDBY` en naranja, `CONNECTED` en verde, `CON-ERR`/`PING ERROR` en rojo).
-* **Información de Hardware:** Refleja el string del dispositivo identificado (ej: `SmartHEMS` o `SmartHEMS (Forzado por Excepcion)`) y el recuento de conexiones TCP activas de clientes sobre el total permitido (`X / 4`).
-* **Caja Naranja de Depuración del Primado Inicial:** Un bloque visual crítico que se muestra si la comprobación inicial está activa, detallando el número total de intentos de conexión, la fase de control de texto exacta (ej: *"Leyendo cuerpo de datos PDU"*), la última trama Hexadecimal enviada, la última trama Hexadecimal recibida del bus y el diagnóstico descriptivo del último error en caso de fallo.
+* **Estado del Servidor:** Muestra con códigos de colores semafóricos el estado real del túnel hacia la EMMA (`STANDBY` en naranja, `CONNECTED` en verde, `CON-ERR`/`PING ERROR` en rojo y `APAGADO` en rojo destacado en caso de desconexión segura pasiva).
+* **Información de Hardware:** Refleja el string del dispositivo identificado (ej: `SmartHEMS`) y el recuento de conexiones TCP activas de clientes sobre el total permitido (`X / 4`).
+* **Caja Naranja de Depuración del Primado Inicial:** Un bloque visual crítico que se muestra si la comprobación inicial está activa, detallando el número total de intentos de conexión, la fase de control de texto exacta, la última trama Hexadecimal enviada, la última trama Hexadecimal recibida del bus y el diagnóstico descriptivo del último error en caso de fallo.
 * **Historial Dinámico de IPs Clientes:** Una tabla estructurada que registra las últimas 10 direcciones IP únicas que han atacado el proxy Modbus, sumando el total acumulado de peticiones por cliente y calculando de forma elástica cuántos segundos hace que enviaron su última trama.
-* **Apagado Seguro:** Un botón rojo destacado que llama al endpoint `/apagar`, cerrando todos los sockets abiertos con Huawei de forma ordenada para liberar inmediatamente el slot de la EMMA antes de desconectar físicamente el ESP32.
+* **Apagado Seguro:** Un botón rojo destacado que llama al endpoint `/apagar`, liberando inmediatamente el slot de la EMMA antes de desconectar físicamente el ESP32, manteniendo el servidor web y la OTA disponibles de fondo.
 
 ---
 
@@ -112,7 +121,7 @@ La respuesta se genera concatenando buffers en memoria para eliminar el uso de l
 
 ---
 
-## 🎛 ... Manual del Menú de Hardware e Interfaz OLED (Local)
+## 🎛 Manual del Menú de Hardware e Interfaz OLED (Local)
 
 En su estado en reposo (`MENU_IDLE`), el OLED SH1106 muestra la IP local del proxy, el estado de conexión del backend, el nombre del modelo detectado y el contador de sockets (`X/4`). Al pulsar el botón **OK**, el dispositivo suspende el renderizado de reposo y entra en el menú de diagnóstico avanzado navegable con los botones **[+]**, **[-]** y **[BACK]**:
 
@@ -129,12 +138,12 @@ En su estado en reposo (`MENU_IDLE`), el OLED SH1106 muestra la IP local del pro
 ### 3. Modbus Fijo
 
 * **Funcionalidad:** Realiza un test de inyección manual de comandos en Capa 7 hacia el dispositivo destino utilizando los parámetros por defecto de los peajes.
-* **Operación:** Abre un socket manual, inyecta la trama de 15 registros al ID 0, registro 30000, e inspecciona la respuesta en pantalla. Muestra el texto ASCII limpio devuelto por la EMMA o intercepta el código de excepción en formato legible (ej: `Modbus Ok! Respuesta Excepcion Viva`).
+* **Operación:** Abre un socket manual, inyecta la trama de 15 registros al ID 0, registro 30000, e inspecciona la respuesta en pantalla. Muestra el texto ASCII limpio devuelto por la EMMA o intercepta el código de excepción en formato legible.
 
 ### 4. Escaner Auto-HA
 
-* **Funcionalidad:** Modos de búsqueda forense automáticos para mapear el bus RS485/Modbus.
-* **Operación:** Emula el algoritmo de descubrimiento de integraciones de domótica. Recorre de forma secuencial una lista de IDs sospechosos, incluyendo de manera estricta el **ID 00 (SmartHEMS / EMMA)** y el **ID 06 (Inversor SUN2000)** (`0, 1, 2, 3, 6, 16, 100, 255`). Envía a cada uno una petición de lectura de 15 registros al bloque 30000. Para cada ID, abre y cierra el socket de manera estricta y con un retraso deliberado para **burlar el cortafuegos de Huawei**. Si localiza un ID que responde con datos de texto válidos, detiene el bucle, guarda el ID con éxito y muestra el resultado en el OLED (ej: *"ID: 6 Leido: SUN2000-10K-LC0"*).
+* **Funcionalidad:** Modos de búsqueda forense automáticos para mapear el bus RS485/Modbus de forma desasistida.
+* **Operación:** Emula el descubrimiento de integraciones de domótica. Recorre secuencialmente los IDs sospechosos (`0, 1, 2, 3, 6, 16, 100, 255`), incluyendo de manera estricta el **ID 00 (EMMA)** y el **ID 06 (Inversor SUN2000)**. Lanza una petición de lectura de 15 registros al bloque 30000. Para cada ID, abre y cierra el socket de manera estricta con un retraso deliberado para **burlar el cortafuegos de Huawei**. Si localiza un ID válido, detiene el bucle y muestra el resultado en el OLED (ej: *"ID: 6 Leido: SUN2000-10K-LC0"*).
 
 ### 5. Pausar / Reanudar Comms
 
@@ -143,20 +152,44 @@ En su estado en reposo (`MENU_IDLE`), el OLED SH1106 muestra la IP local del pro
 
 ### 6. Apagar Proxy
 
-* **Funcionalidad:** Procedimiento de desmantelamiento y apagado seguro de la electrónica.
-* **Operación:** Al confirmar la selección con **OK**, el ESP32 ejecuta la rutina `ejecutarApagado()`. Desconecta ordenadamente el socket de Huawei, detiene y destruye las instancias del `proxyServer` Modbus y del `webServer` HTTP para liberar los descriptores en red, corta la comunicación de los sockets de clientes activos, borra la pantalla e imprime un cartel estático en letras grandes: **APAGADO - Seguro desconectar**. El procesador entra entonces en un bucle infinito de seguridad para evitar reconexiones involuntarias hasta que se le corte la alimentación eléctrica.
+* **Funcionalidad:** Procedimiento de desmantelamiento y aislamiento seguro de la electrónica.
+* **Operación:** Al confirmar la selección con **OK**, el ESP32 ejecuta la rutina `ejecutarApagado()`. Desconecta ordenadamente el socket de Huawei y detiene la instancia del `proxyServer` Modbus para liberar los descriptores en red de los clientes activos. Borra la pantalla e imprime un desglose técnico estático:
+* **ModbusTCP: DISABLED** (La EMMA queda 100% libre y protegida de tráfico).
+* **Dashboard: ENABLED** (La interfaz web sigue sirviendo telemetría histórica).
+* **OTA: ENABLED** (Permite sacarlo de este estado de letargo enviando un nuevo firmware por red).
+
+
+
+### 7. About
+
+* **Funcionalidad:** Pantalla informativa de autoría y versión.
+* **Operación:** Renderiza de forma totalmente simétrica y centrada por píxel la versión semántica activa del programa bajo los créditos del desarrollador Guybrush Threepwood. Al pulsar **BACK** o **OK** regresa inmediatamente al menú principal.
 
 ---
 
-## 🛠️ Mapeo de Hardware (Pines ESP32)
+## 🛠️ Mapeo de Hardware y Distribución de Pines (WT32-ETH01)
 
-| Componente | Pin ESP32 | Función |
-| --- | --- | --- |
-| **OLED SDA** | GPIO 33 | Línea de datos I2C |
-| **OLED SCL** | GPIO 32 | Línea de reloj I2C |
-| **Botón OK** | GPIO 4 | Entrada con Pull-Up interno |
-| **Botón BACK** | GPIO 14 | Entrada con Pull-Up interno |
-| **Botón MÁS (+)** | GPIO 15 | Entrada con Pull-Up interno |
-| **Botón MENOS (-)** | GPIO 39 | Entrada digital pura |
+Para orientarse físicamente en la placa base: mirar el módulo WT32-ETH01 por la cara superior con el conector de red **RJ45 hacia la derecha**. El **Pin 1 (EN)** es el primero de arriba a la izquierda, bajando en línea recta hasta el **Pin 10**. El **Pin 11** comienza abajo a la derecha y sube en vertical hasta el **Pin 20** (arriba a la derecha).
+
+| Nº Pin Físico | Etiqueta (Silk) | Componente Destino | Tipo de Conexión / Resistencia Requerida |
+| --- | --- | --- | --- |
+| **2** | `CFG (IO32)` | Pantalla OLED — Pin **SCL** | Línea de reloj síncrono I2C |
+| **3** | `485_EN (IO33)` | Pantalla OLED — Pin **SDA** | Línea de datos bidireccional I2C |
+| **6** | `GND` | Masa Común (OLED, Teclado, USB) | **Punto de tierra unificado del circuito** |
+| **7** | `3V3` | **SÓLO Adaptador Serial USB-TTL** | **¡PRECAUCIÓN!** Inyección de energía exclusiva de flasheo por cable. |
+| **9** | `5V` | **Línea de Alimentación Definitiva** | Entrada de corriente continua (VCC) para el funcionamiento en caja. |
+| **12** | `IO39` | Pulsador Físico — **Botón MENOS (-)** | **⚠️ REQUIERE RESISTENCIA EXTERNA PULL-UP a 3V3** (Pin *Input Only*). |
+| **14** | `IO15` | Pulsador Físico — **Botón MÁS (+)** | Configurado con Pull-Up interno por Software. |
+| **15** | `IO14` | Pulsador Físico — **Botón BACK** | Configurado con Pull-Up interno por Software. |
+| **18** | `IO4` | Pulsador Físico — **Botón OK** | Configurado con Pull-Up interno por Software. |
+
+### 💾 Pines Especiales de Flasheo (Puerto Serie de Depuración)
+
+Para la carga inicial del firmware o recuperación de emergencia usando un programador externo por cable (ej: CH341T), las líneas serie cruzadas se mapean en los pads del transceptor:
+
+* **Pin `TX0` (Transmisión):** Conectar al pin **RX** del programador USB-TTL.
+* **Pin `RX0` (Recepción):** Conectar al pin **TX** del programador USB-TTL.
+
+> ⚠️ **REGLA DE ORO DE SEGURIDAD ELÉCTRICA:** Jamás se deben conectar simultáneamente la alimentación de 5V de trabajo (Pin 9) y la alimentación de 3.3V del programador serie (Pin 7). Romper esta norma provocará un retorno de corriente que puede dañar de forma permanente el aislamiento del puerto USB de tu ordenador o fundir el regulador del ESP32.
 
 ---
