@@ -12,7 +12,7 @@ $fn = 64; // Calidad de renderizado para círculos
 ancho_plancha    = 135;  // Ancho total de la placa de pruebas
 alto_plancha     = 65;   // Alto total de la placa de pruebas
 espesor_plancha  = 3.5;  // Espesor total (permite rigidez y recesos estables)
-prof_receso      = 1.8;  // Profundidad del cajeado trasero para empotrar componentes
+prof_receso      = 2.5;  // Profundidad del cajeado trasero para empotrar componentes
 
 // --- MEDIDAS COMPONENTES (HUAWEI PROXY) ---
 // Pantalla OLED (Según especificaciones)
@@ -31,8 +31,8 @@ pantalla_pin_h     = 2.0;   // Longitud del tetón (recorre los 1.8mm de profund
 cruz_x             = 42;    // Centro X de la disposición en cruz
 cruz_y             = 32.5;  // Centro Y de la disposición en cruz
 dist_cruz          = 14.5;  // Distancia compacta desde el centro a cada pulsador
-boton_cuerpo       = 12.3;  // Ancho cajeado (12mm + 0.3mm tolerancia impresión)
-boton_vasto_dia    = 6.0;   // Agujero pasante para el capuchón/vástago redondo
+boton_cuerpo       = 13;  // Ancho cajeado (13mm )
+boton_vasto_dia    = 8.0;   // Agujero pasante para el capuchón/vástago redondo
 prog_x             = 15;    // Posición X botón de Flasheo (PROG)
 prog_y             = 51;    // Posición Y botón de Flasheo (PROG)
 
