@@ -1,8 +1,3 @@
-He actualizado el archivo tomando como base el documento original. He integrado las novedades de la versión 2.0 (servidor web, control de fragmentación, cuarentena/ping) y de la versión 3.0 (endpoint API con JSON y comprobación atómica), además de actualizar el esquema ASCII de la arquitectura para reflejar las nuevas conexiones web.
-
-Aquí tienes el código completo para tu nuevo `README.md`:
-
-```markdown
 # 🔋 ESP32 Modbus TCP Proxy & Multiplexer for Huawei EMMA & SUN2000
 
 Este repositorio contiene el firmware definitivo para un dispositivo basado en **ESP32** (compatible con conexión WiFi o Ethernet WT32-ETH01) que actúa como una **pasarela, proxy intermedio y multiplexor de conexiones Modbus TCP** de grado industrial. 
@@ -154,7 +149,3 @@ Para conectar Home Assistant al ecosistema, se debe apuntar la integración ofic
 ---
 
 *Desarrollado y depurado de forma quirúrgica para la estabilidad energética local.*
-
-```
-
-```
