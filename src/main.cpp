@@ -106,6 +106,7 @@ void ejecutarApagado();
 int getActiveClientCount();
 void handleWebRoot();
 void handleWebShutdown();
+void handleApiStatus(); // <-- NUEVA DECLARACIÓN DE LA API
 
 void setup() {
     Serial.begin(115200);
@@ -121,7 +122,7 @@ void setup() {
     display.setTextColor(SH110X_WHITE);
     display.setCursor(0, 10);
     display.println("INICIANDO PROXY...");
-    display.println("Modbus TCP v3.1 (HA)"); 
+    display.println("Modbus TCP v3.2 (HA)"); 
     display.display();
 
     if (USE_ETHERNET) {
@@ -134,6 +135,7 @@ void setup() {
     
     webServer.on("/", handleWebRoot);
     webServer.on("/apagar", handleWebShutdown);
+    webServer.on("/api/status", handleApiStatus); // <-- NUEVA RUTA API REGISTRADA
     webServer.begin();
 
     backendMutex = xSemaphoreCreateMutex();
@@ -156,7 +158,7 @@ void loop() {
 }
 
 // ====================================================================
-// MOTOR DEL SERVIDOR WEB HTTP
+// MOTOR DEL SERVIDOR WEB HTTP Y API
 // ====================================================================
 void handleWebRoot() {
     String html = "<!DOCTYPE html><html lang='es'><head><meta charset='UTF-8'>";
@@ -251,6 +253,33 @@ void handleWebShutdown() {
     
     webServer.send(200, "text/html", html);
     pendingShutdown = true; 
+}
+
+// --- NUEVA FUNCIÓN: ENDPOINT API JSON ---
+void handleApiStatus() {
+    String stateStr = "WAITING";
+    if (currentBackendState == BK_STANDBY) stateStr = "STANDBY";
+    else if (currentBackendState == BK_CONNECTED) stateStr = "CONNECTED";
+    else if (currentBackendState == BK_CON_ERR) stateStr = "CON-ERR";
+    else if (currentBackendState == BK_STARTUP_PING) stateStr = "PINGING";
+    else if (currentBackendState == BK_PING_ERR) stateStr = "PING ERROR";
+    else if (currentBackendState == BK_PAUSED) stateStr = "PAUSED";
+
+    int activeSockets = getActiveClientCount();
+    uint32_t currentUptime = millis() / 1000;
+
+    String json = "{";
+    json += "\"uptime_seconds\":" + String(currentUptime) + ",";
+    json += "\"backend_state\":\"" + stateStr + "\",";
+    json += "\"device_model\":\"" + emmaDeviceModel + "\",";
+    json += "\"active_clients\":" + String(activeSockets) + ",";
+    json += "\"max_clients\":" + String(MAX_CLIENTS) + ",";
+    json += "\"debug_attempts\":" + String(emmaDebugAttempts) + ",";
+    json += "\"debug_stage\":\"" + emmaDebugStage + "\",";
+    json += "\"debug_error\":\"" + emmaDebugError + "\"";
+    json += "}";
+
+    webServer.send(200, "application/json", json);
 }
 // ====================================================================
 
