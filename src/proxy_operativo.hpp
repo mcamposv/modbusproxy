@@ -637,8 +637,13 @@ void taskModbusProxy(void *parameter) {
                                     }
 
                                     if (backendClient.connected()) {
-                                        backendClient.write(mbap, 7);
-                                        backendClient.write(pdu, pduLen);
+                                        // 🛑 PARCHE ANTI-FRAGMENTACIÓN: Unir trama completa antes de enviar a EMMA
+                                        uint16_t totalReqLen = 7 + pduLen;
+                                        uint8_t* totalReq = new uint8_t[totalReqLen];
+                                        memcpy(totalReq, mbap, 7);
+                                        memcpy(totalReq + 7, pdu, pduLen);
+                                        backendClient.write(totalReq, totalReqLen);
+                                        delete[] totalReq;
                                         
                                         uint8_t resMbap[7];
                                         if (readExact(backendClient, resMbap, 7, 500)) {
@@ -647,8 +652,13 @@ void taskModbusProxy(void *parameter) {
                                                 uint16_t resPduLen = resRemainingLength - 1; 
                                                 uint8_t* resPdu = new uint8_t[resPduLen];
                                                 if (readExact(backendClient, resPdu, resPduLen, 500)) {
-                                                    clients[i].write(resMbap, 7);
-                                                    clients[i].write(resPdu, resPduLen);
+                                                    // 🛑 PARCHE ANTI-FRAGMENTACIÓN: Unir trama completa antes de reenviar al Cliente
+                                                    uint16_t totalResLen = 7 + resPduLen;
+                                                    uint8_t* totalRes = new uint8_t[totalResLen];
+                                                    memcpy(totalRes, resMbap, 7);
+                                                    memcpy(totalRes + 7, resPdu, resPduLen);
+                                                    clients[i].write(totalRes, totalResLen);
+                                                    delete[] totalRes;
                                                 }
                                                 delete[] resPdu;
                                             }
