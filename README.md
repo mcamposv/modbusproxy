@@ -182,6 +182,9 @@ Para orientarse físicamente en la placa base: mirar el módulo WT32-ETH01 por l
 | **14** | `IO15` | Pulsador Físico — **Botón MÁS (+)** | Configurado con Pull-Up interno por Software. |
 | **15** | `IO14` | Pulsador Físico — **Botón BACK** | Configurado con Pull-Up interno por Software. |
 | **18** | `IO4` | Pulsador Físico — **Botón OK** | Configurado con Pull-Up interno por Software. |
+| **1** | `EN` | Pulsador Físico — **Botón Reset** | conexion a gnd para resetear . |
+| **18** | `IO4` | Pulsador Físico — **Botón OK** | Configurado con Pull-Up interno por Software. |
+
 
 ### 💾 Pines Especiales de Flasheo (Puerto Serie de Depuración)
 
@@ -190,6 +193,25 @@ Para la carga inicial del firmware o recuperación de emergencia usando un progr
 * **Pin `TX0` (Transmisión):** Conectar al pin **RX** del programador USB-TTL.
 * **Pin `RX0` (Recepción):** Conectar al pin **TX** del programador USB-TTL.
 
++-------------------+
+               |   WIFI ANTENNA    |
+               +-------------------+
+         TX0  [13] o           o [14]  EN
+         RX0  [12] o           o [15]  GND
+         IO0  [11] o           o [16]  3V3
+         GND  [10] o           o [17]  EN
+        IO39  [09] o   ESP32   o [18]  CFG
+        IO36  [08] o    ETH    o [19]  485_EN
+        IO15  [07] o   RS485   o [20]  RXD
+        IO14  [06] o           o [21]  TXD
+        IO12  [05] o           o [22]  GND
+        IO30  [04] o           o [23]  3V3
+         IO4  [03] o           o [24]  GND
+         IO2  [02] o           o [25]  5V
+         GND  [01] o           o [26]  LINK
+               +-------------------+
+               |     ETH0 PORT     |
+               +-------------------+
 > ⚠️ **REGLA DE ORO DE SEGURIDAD ELÉCTRICA:** Jamás se deben conectar simultáneamente la alimentación de 5V de trabajo (Pin 9) y la alimentación de 3.3V del programador serie (Pin 7). Romper esta norma provocará un retorno de corriente que puede dañar de forma permanente el aislamiento del puerto USB de tu ordenador o fundir el regulador del ESP32.
 
 ---

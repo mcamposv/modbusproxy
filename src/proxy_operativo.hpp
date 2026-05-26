@@ -12,13 +12,14 @@
 // ====================================================================
 // CONFIGURACIÓN PARAMETRIZABLE
 // ====================================================================
-const bool USE_ETHERNET       = true;  
-const bool USE_DHCP           = false;   
+const bool USE_ETHERNET       = false;  
+const bool USE_DHCP           = true;   
 const bool ROTATE_SCREEN      = false;  
 
 const uint8_t MODBUS_FIXED_ID = 0;      
 const uint16_t MODBUS_TEST_REG = 30000; 
-const uint32_t RECONNECT_DELAY = 5000;  
+//const uint32_t RECONNECT_DELAY = 5000;  
+const uint32_t RECONNECT_DELAY = 100;
 
 // Versión del Firmware configurable desde arriba
 const String FIRMWARE_VERSION  = "4.0.0"; 
@@ -532,12 +533,20 @@ void taskModbusProxy(void *parameter) {
                                             modelStr[byteCount] = '\0';
                                             
                                             String cleanStr = String(modelStr);
+
+                                            // --- CIRUGÍA ESTÉTICA: Cortar en el primer espacio ---
+                                            int posEspacio = cleanStr.indexOf(' '); 
+                                            if (posEspacio > 0) {
+                                                cleanStr = cleanStr.substring(0, posEspacio); // Corta el texto
+                                            }
+                                            // -----------------------------------------------------
+
                                             cleanStr.trim(); 
-                                            
+
                                             if (cleanStr.length() > 0) {
                                                 emmaDeviceModel = cleanStr;  
                                             } else {
-                                                emmaDeviceModel = "SmartHEMS";
+                                                emmaDeviceModel = "UNKNOWN";
                                             }
                                             delete[] modelStr;
                                         }
