@@ -12,8 +12,8 @@
 // ====================================================================
 // CONFIGURACIÓN PARAMETRIZABLE
 // ====================================================================
-const bool USE_ETHERNET       = false;  
-const bool USE_DHCP           = true;   
+const bool USE_ETHERNET       = true;  
+const bool USE_DHCP           = false;   
 const bool ROTATE_SCREEN      = false;  
 
 const uint8_t MODBUS_FIXED_ID = 0;      
