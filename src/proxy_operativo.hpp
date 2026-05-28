@@ -8,13 +8,27 @@
 #include <WebServer.h> 
 #include <ArduinoOTA.h> 
 #include "secrets.h"
+#include <esp_wifi.h>
+#include <esp_log.h>
 
 // ====================================================================
 // CONFIGURACIÓN PARAMETRIZABLE
 // ====================================================================
-const bool USE_ETHERNET       = true;  
+const bool USE_ETHERNET       = false;  
 const bool USE_DHCP           = false;   
 const bool ROTATE_SCREEN      = false;  
+
+// Configuración de red local estática de rescate
+IPAddress local_IP(192, 168, 254, 213);
+IPAddress gateway(192, 168, 254, 252);
+IPAddress subnet(255, 255, 255, 0);
+IPAddress dns_primary(192, 168, 254, 252);
+IPAddress targetModbusIP;
+
+const int BOTON_OK    = 4;
+const int BOTON_BACK  = 14;
+const int BOTON_MAS   = 15;
+const int BOTON_MENOS = 39;
 
 const uint8_t MODBUS_FIXED_ID = 0;      
 const uint16_t MODBUS_TEST_REG = 30000; 
@@ -22,7 +36,7 @@ const uint16_t MODBUS_TEST_REG = 30000;
 const uint32_t RECONNECT_DELAY = 100;
 
 // Versión del Firmware configurable desde arriba
-const String FIRMWARE_VERSION  = "4.0.0"; 
+const String FIRMWARE_VERSION  = "4.5.0"; 
 // ====================================================================
 
 // Máquina de estados extendida
@@ -49,17 +63,52 @@ String emmaDebugHexReceived = "-";
 String emmaDebugError = "Esperando red e inicio de test...";
 uint32_t emmaDebugAttempts = 0;
 
-// Configuración de red local estática de rescate
-IPAddress local_IP(192, 168, 254, 211);
-IPAddress gateway(192, 168, 254, 252);
-IPAddress subnet(255, 255, 255, 0);
-IPAddress dns_primary(192, 168, 254, 252);
-IPAddress targetModbusIP;
+// ====================================================================
+// REGISTRO CIRCULAR DE TRANSACCIONES MODBUS (LOG)
+// ====================================================================
+struct ModbusTransaction {
+    uint32_t timestamp;      // millis() / 1000
+    char     clientIP[16];   // IP origen del cliente
+    uint8_t  unitID;         // Unit ID Modbus
+    uint8_t  funcCode;       // Código de función
+    uint16_t regAddress;     // Dirección de registro (de la request)
+    uint16_t regCount;       // Cantidad de registros (de la request)
+    char     destIP[16];     // IP destino (EMMA/inversor)
+    bool     requestOk;      // Trama de request bien formada
+    bool     responseOk;     // Respuesta recibida y válida
+    uint8_t  errorCode;      // 0 = sin error; otro = código excepción Modbus
+    char     reqHex[80];     // Bytes hex de la request completa
+    char     resHex[80];     // Bytes hex de la response completa
+};
 
-const int BOTON_OK    = 4;
-const int BOTON_BACK  = 14;
-const int BOTON_MAS   = 15;
-const int BOTON_MENOS = 39; 
+const int MAX_TX_LOG = 200;
+ModbusTransaction txLog[MAX_TX_LOG];
+int txLogHead  = 0;   // Índice circular: siguiente posición de escritura
+int txLogCount = 0;   // Cuántas entradas válidas hay (0..MAX_TX_LOG)
+SemaphoreHandle_t txLogMutex;
+
+// Convierte un bloque de bytes en cadena HEX separada por espacios
+void bytesToHexStr(const uint8_t* data, size_t len, char* out, size_t outLen) {
+    out[0] = '\0';
+    size_t pos = 0;
+    for (size_t i = 0; i < len && pos + 3 < outLen; i++) {
+        uint8_t b = data[i];
+        out[pos++] = "0123456789ABCDEF"[b >> 4];
+        out[pos++] = "0123456789ABCDEF"[b & 0x0F];
+        if (i + 1 < len && pos + 1 < outLen - 2) out[pos++] = ' ';
+    }
+    out[pos] = '\0';
+}
+
+void logTransaction(const ModbusTransaction &tx) {
+    if (xSemaphoreTake(txLogMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+        txLog[txLogHead] = tx;
+        txLogHead = (txLogHead + 1) % MAX_TX_LOG;
+        if (txLogCount < MAX_TX_LOG) txLogCount++;
+        xSemaphoreGive(txLogMutex);
+    }
+}
+
 
 #define DIRECCION_I2C 0x3C
 #define ANCHO_PANTALLA 128
@@ -114,6 +163,9 @@ int getActiveClientCount();
 void handleWebRoot();
 void handleWebShutdown();
 void handleApiStatus(); 
+void handleWebLog();
+void handleWebLogCsv();
+String buildNavBar(const String &activePage);
 
 void setupOTA() {
     ArduinoOTA.setPort(3232);
@@ -186,7 +238,13 @@ void setupOTA() {
 }
 
 void setup() {
+    // Inicializar el puerto serie lo antes posible y silenciar
+    // inmediatamente todos los logs internos del SDK de Espressif.
+    // Sin esto, WiFi stack, mDNS y ArduinoOTA vuelcan texto y binario
+    // por UART0 mezclado con nuestra salida de diagnóstico.
     Serial.begin(115200);
+    esp_log_level_set("*", ESP_LOG_NONE);
+
     targetModbusIP.fromString(MODBUS_SERVER_IP);
     pinMode(BOTON_OK, INPUT_PULLUP); pinMode(BOTON_BACK, INPUT_PULLUP);
     pinMode(BOTON_MAS, INPUT_PULLUP); pinMode(BOTON_MENOS, INPUT); 
@@ -213,12 +271,60 @@ void setup() {
     delay(500); 
     setupOTA(); 
 
-    webServer.on("/", handleWebRoot);
-    webServer.on("/apagar", handleWebShutdown);
-    webServer.on("/api/status", handleApiStatus); 
+    webServer.on("/",          handleWebRoot);
+    webServer.on("/apagar",    handleWebShutdown);
+    webServer.on("/api/status",handleApiStatus);
+    webServer.on("/log",       handleWebLog);
+    webServer.on("/log.csv",   handleWebLogCsv);
     webServer.begin();
 
     backendMutex = xSemaphoreCreateMutex();
+    txLogMutex   = xSemaphoreCreateMutex();
+
+    // ----------------------------------------------------------
+    // VOLCADO DE INFORMACIÓN DE RED POR PUERTO SERIE AL ARRANQUE
+    // ----------------------------------------------------------
+    Serial.println();
+    Serial.println("============================================");
+    Serial.println("  PROXY MODBUS TCP v" + FIRMWARE_VERSION);
+    Serial.println("============================================");
+
+    if (USE_ETHERNET) {
+        uint8_t mac[6];
+        esp_read_mac(mac, ESP_MAC_ETH);
+        Serial.printf("  Interfaz : ETHERNET (LAN8720)\n");
+        Serial.printf("  MAC      : %02X:%02X:%02X:%02X:%02X:%02X\n",
+                      mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+        if (!USE_DHCP) {
+            Serial.print("  IP       : "); Serial.println(local_IP.toString());
+            Serial.print("  Subnet   : "); Serial.println(subnet.toString());
+            Serial.print("  Gateway  : "); Serial.println(gateway.toString());
+        } else {
+            Serial.println("  IP       : Esperando DHCP...");
+        }
+    } else {
+        uint8_t mac[6];
+        esp_wifi_get_mac(WIFI_IF_STA, mac);
+        Serial.printf("  Interfaz : WIFI (STA)\n");
+        Serial.printf("  SSID     : %s\n", WIFI_SSID);
+        Serial.printf("  MAC      : %02X:%02X:%02X:%02X:%02X:%02X\n",
+                      mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+        // Esperar hasta 10 s a que la conexión WiFi suba (static ya debería estar)
+        uint32_t t0 = millis();
+        while (WiFi.status() != WL_CONNECTED && millis() - t0 < 10000) delay(200);
+        if (WiFi.status() == WL_CONNECTED) {
+            Serial.print("  IP       : "); Serial.println(WiFi.localIP().toString());
+            Serial.print("  Subnet   : "); Serial.println(WiFi.subnetMask().toString());
+            Serial.print("  Gateway  : "); Serial.println(WiFi.gatewayIP().toString());
+        } else {
+            Serial.println("  IP       : Sin conexion WiFi todavia");
+        }
+    }
+    Serial.print("  Destino  : ");
+    Serial.print(MODBUS_SERVER_IP); Serial.print(":"); Serial.println(MODBUS_SERVER_PORT);
+    Serial.println("============================================");
+    Serial.println();
+
     xTaskCreatePinnedToCore(taskModbusProxy, "TaskModbusProxy", 8192, NULL, 1, NULL, 0);
 }
 
@@ -245,26 +351,56 @@ void loop() {
 }
 
 // ====================================================================
+// BARRA DE NAVEGACIÓN COMPARTIDA
+// ====================================================================
+String buildNavBar(const String &activePage) {
+    String nav = "<nav style='background:#1a1a2e;padding:10px 20px;display:flex;";
+    nav += "gap:12px;align-items:center;border-bottom:2px solid #4da6ff;";
+    nav += "position:sticky;top:0;z-index:999;'>";
+    nav += "<span style='color:#4da6ff;font-weight:700;font-size:15px;margin-right:10px;'>&#9641; PROXY MODBUS</span>";
+
+    // Lambda para generar cada enlace de navegación
+    auto navLink = [&](const String &href, const String &label, const String &page) -> String {
+        bool active = (activePage == page);
+        String s = "<a href='" + href + "' style='color:";
+        s += active ? "#000;background:#4da6ff;" : "#a0c4ff;background:transparent;";
+        s += "padding:6px 14px;border-radius:5px;text-decoration:none;font-size:14px;font-weight:";
+        s += active ? "700" : "500";
+        s += ";border:1px solid ";
+        s += active ? "#4da6ff" : "#2a3a5a";
+        s += ";'>" + label + "</a>";
+        return s;
+    };
+
+    nav += navLink("/",    "Dashboard",  "dashboard");
+    nav += navLink("/log", "Log Modbus", "log");
+    nav += "</nav>";
+    return nav;
+}
+
+// ====================================================================
 // MOTOR DEL SERVIDOR WEB HTTP Y API
 // ====================================================================
 void handleWebRoot() {
     String html = "<!DOCTYPE html><html lang='es'><head><meta charset='UTF-8'>";
     html += "<meta name='viewport' content='width=device-width, initial-scale=1.0'>";
     html += "<meta http-equiv='refresh' content='5'>"; 
-    html += "<title>Monitor Proxy Modbus</title>";
+    html += "<title>Dashboard - Proxy Modbus</title>";
     html += "<style>";
-    html += "body { background-color: #121212; color: #e0e0e0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 20px; }";
-    html += ".container { max-width: 800px; margin: 0 auto; background-color: #1e1e1e; padding: 20px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }";
-    html += "h1 { color: #4da6ff; border-bottom: 1px solid #333; padding-bottom: 10px; }";
-    html += "table { width: 100%; border-collapse: collapse; margin-top: 20px; margin-bottom: 30px; }";
-    html += "th, td { border: 1px solid #333; padding: 12px; text-align: center; }";
-    html += "th { background-color: #2d2d2d; color: #4da6ff; }";
-    html += "tr:nth-child(even) { background-color: #1a1a1a; }";
-    html += ".status { font-weight: bold; padding: 5px 10px; border-radius: 5px; }";
-    html += ".btn-danger { display: inline-block; background-color: #dc3545; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; font-weight: bold; border: none; cursor: pointer; }";
-    html += ".btn-danger:hover { background-color: #c82333; }";
-    html += "code { background-color: #111; padding: 4px 8px; border-radius: 3px; font-family: monospace; font-size: 14px; display: inline-block; word-break: break-all; }";
+    html += "*{box-sizing:border-box;}";
+    html += "body{background-color:#121212;color:#e0e0e0;font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;margin:0;padding:0;}";
+    html += ".container{max-width:860px;margin:20px auto;background-color:#1e1e1e;padding:20px;border-radius:10px;box-shadow:0 4px 6px rgba(0,0,0,0.3);}";
+    html += "h1{color:#4da6ff;border-bottom:1px solid #333;padding-bottom:10px;margin-top:0;}";
+    html += "table{width:100%;border-collapse:collapse;margin-top:20px;margin-bottom:30px;}";
+    html += "th,td{border:1px solid #333;padding:12px;text-align:center;}";
+    html += "th{background-color:#2d2d2d;color:#4da6ff;}";
+    html += "tr:nth-child(even){background-color:#1a1a1a;}";
+    html += ".status{font-weight:bold;padding:5px 10px;border-radius:5px;}";
+    html += ".btn-danger{display:inline-block;background-color:#dc3545;color:white;padding:10px 20px;text-decoration:none;border-radius:5px;font-weight:bold;border:none;cursor:pointer;}";
+    html += ".btn-danger:hover{background-color:#c82333;}";
+    html += "code{background-color:#111;padding:4px 8px;border-radius:3px;font-family:monospace;font-size:14px;display:inline-block;word-break:break-all;}";
     html += "</style></head><body>";
+    html += buildNavBar("dashboard");
     
     html += "<div class='container'>";
     html += "<h1>📊 Monitor Proxy Modbus (HA)</h1>";
@@ -335,13 +471,18 @@ void handleWebRoot() {
 void handleWebShutdown() {
     String html = "<!DOCTYPE html><html lang='es'><head><meta charset='UTF-8'>";
     html += "<meta name='viewport' content='width=device-width, initial-scale=1.0'>";
-    html += "<title>Apagando...</title>";
-    html += "<style>body { background-color: #121212; color: #fff; font-family: sans-serif; text-align: center; padding-top: 20%; }</style>";
+    html += "<title>Apagando - Proxy Modbus</title>";
+    html += "<style>*{box-sizing:border-box;}body{background-color:#121212;color:#fff;";
+    html += "font-family:sans-serif;margin:0;padding:0;}";
+    html += ".container{max-width:600px;margin:40px auto;text-align:center;";
+    html += "background:#1e1e1e;padding:30px;border-radius:10px;}</style>";
     html += "</head><body>";
-    html += "<h1 style='color: #dc3545;'>🛑 APAGADO INICIADO</h1>";
+    html += buildNavBar("dashboard");
+    html += "<div class='container'>";
+    html += "<h1 style='color:#dc3545;'>APAGADO INICIADO</h1>";
     html += "<p>El puerto TCP ha sido liberado en la EMMA.</p>";
     html += "<p>El Dashboard Web y el servicio OTA continuarán operativos de fondo.</p>";
-    html += "</body></html>";
+    html += "</div></body></html>";
     
     webServer.send(200, "text/html", html);
     pendingShutdown = true; 
@@ -374,6 +515,188 @@ void handleApiStatus() {
     webServer.send(200, "application/json", json);
 }
 
+// ====================================================================
+// PÁGINA WEB: LOG DE TRANSACCIONES MODBUS
+// ====================================================================
+void handleWebLog() {
+    String html = "<!DOCTYPE html><html lang='es'><head><meta charset='UTF-8'>";
+    html += "<meta name='viewport' content='width=device-width, initial-scale=1.0'>";
+    html += "<meta http-equiv='refresh' content='30'>";
+    html += "<title>Log Modbus - Proxy</title>";
+    html += "<style>";
+    html += "*{box-sizing:border-box;}";
+    html += "body{background:#121212;color:#e0e0e0;font-family:'Segoe UI',sans-serif;margin:0;padding:0;}";
+    html += ".wrap{max-width:1400px;margin:20px auto;padding:0 12px;}";
+    html += "h1{color:#4da6ff;border-bottom:1px solid #333;padding-bottom:8px;margin-top:0;}";
+    html += ".toolbar{display:flex;align-items:center;gap:12px;margin-bottom:12px;flex-wrap:wrap;}";
+    html += ".btn{display:inline-block;padding:7px 16px;border-radius:5px;text-decoration:none;";
+    html += "font-size:13px;font-weight:600;cursor:pointer;border:none;}";
+    html += ".btn-blue{background:#4da6ff;color:#000;}.btn-blue:hover{background:#3390ee;}";
+    html += ".badge-ok{background:#155724;color:#a3e8b0;padding:3px 8px;border-radius:4px;";
+    html += "font-size:12px;font-weight:700;}";
+    html += ".badge-err{background:#4a1010;color:#f5b8b8;padding:3px 8px;border-radius:4px;";
+    html += "font-size:12px;font-weight:700;}";
+    html += ".badge-warn{background:#3d2f00;color:#ffe082;padding:3px 8px;border-radius:4px;";
+    html += "font-size:12px;font-weight:700;}";
+    html += "table{width:100%;border-collapse:collapse;font-size:12px;}";
+    html += "th,td{border:1px solid #2a2a2a;padding:6px 8px;text-align:left;vertical-align:top;}";
+    html += "th{background:#1a1a2e;color:#4da6ff;white-space:nowrap;position:sticky;top:50px;z-index:10;}";
+    html += "tr:nth-child(even){background:#1a1a1a;}tr:hover{background:#1e2a3a;}";
+    html += ".mono{font-family:monospace;font-size:11px;word-break:break-all;color:#a0ffa0;}";
+    html += ".fc{font-family:monospace;font-weight:700;color:#ffd700;}";
+    html += ".info{color:#888;font-size:13px;}";
+    html += "</style></head><body>";
+    html += buildNavBar("log");
+    html += "<div class='wrap'>";
+    html += "<h1>Log de Transacciones Modbus</h1>";
+
+    // Toolbar
+    html += "<div class='toolbar'>";
+    if (xSemaphoreTake(txLogMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+        html += "<span class='info'>Entradas: <strong>" + String(txLogCount) + " / " + String(MAX_TX_LOG) + "</strong></span>";
+        xSemaphoreGive(txLogMutex);
+    }
+    html += "<a href='/log.csv' class='btn btn-blue'>&#11015; Exportar CSV</a>";
+    html += "<span class='info' style='margin-left:auto;'>Auto-refresco: 30s</span>";
+    html += "</div>";
+
+    // Cabecera de tabla
+    html += "<table><tr>";
+    html += "<th>#</th><th>Tiempo(s)</th><th>Origen</th><th>Destino</th>";
+    html += "<th>Unit ID</th><th>Función</th><th>Registro</th><th>Cant.</th>";
+    html += "<th>Request</th><th>Response</th><th>Excepción</th>";
+    html += "<th>Bytes Request (HEX)</th><th>Bytes Response (HEX)</th>";
+    html += "</tr>";
+
+    if (xSemaphoreTake(txLogMutex, pdMS_TO_TICKS(200)) == pdTRUE) {
+        if (txLogCount == 0) {
+            html += "<tr><td colspan='13' style='text-align:center;color:#666;padding:20px;'>";
+            html += "Sin transacciones registradas todavía.</td></tr>";
+        } else {
+            // Iterar en orden cronológico inverso (más reciente primero)
+            for (int n = 0; n < txLogCount; n++) {
+                int idx = ((txLogHead - 1 - n) % MAX_TX_LOG + MAX_TX_LOG) % MAX_TX_LOG;
+                const ModbusTransaction &t = txLog[idx];
+
+                // Nombre legible de la función Modbus
+                String funcStr;
+                switch (t.funcCode) {
+                    case 0x01: funcStr = "01 ReadCoils";   break;
+                    case 0x02: funcStr = "02 ReadDI";      break;
+                    case 0x03: funcStr = "03 ReadHR";      break;
+                    case 0x04: funcStr = "04 ReadIR";      break;
+                    case 0x05: funcStr = "05 WriteCoil";   break;
+                    case 0x06: funcStr = "06 WriteReg";    break;
+                    case 0x0F: funcStr = "15 WriteCoils";  break;
+                    case 0x10: funcStr = "16 WriteRegs";   break;
+                    default: {
+                        char tmp[8];
+                        snprintf(tmp, sizeof(tmp), "0x%02X", t.funcCode);
+                        funcStr = String(tmp);
+                    }
+                }
+
+                // Badges de estado
+                String reqBadge = t.requestOk
+                    ? "<span class='badge-ok'>OK</span>"
+                    : "<span class='badge-err'>MALFORMED</span>";
+
+                String resBadge;
+                if (!t.responseOk) {
+                    resBadge = "<span class='badge-err'>NO RESP</span>";
+                } else if (t.errorCode != 0) {
+                    char tmp[20];
+                    snprintf(tmp, sizeof(tmp), "EXC 0x%02X", t.errorCode);
+                    resBadge = "<span class='badge-warn'>" + String(tmp) + "</span>";
+                } else {
+                    resBadge = "<span class='badge-ok'>OK</span>";
+                }
+
+                String excStr;
+                if (t.errorCode != 0) {
+                    char tmp[8];
+                    snprintf(tmp, sizeof(tmp), "0x%02X", t.errorCode);
+                    excStr = "<span style='color:#f5b8b8;font-family:monospace;'>" + String(tmp) + "</span>";
+                } else {
+                    excStr = "<span style='color:#555;'>-</span>";
+                }
+
+                html += "<tr>";
+                html += "<td style='color:#555;'>" + String(txLogCount - n) + "</td>";
+                html += "<td>" + String(t.timestamp) + "s</td>";
+                html += "<td>" + String(t.clientIP) + "</td>";
+                html += "<td>" + String(t.destIP) + ":502</td>";
+                html += "<td style='text-align:center;'>" + String(t.unitID) + "</td>";
+                html += "<td class='fc'>" + funcStr + "</td>";
+                html += "<td style='text-align:center;font-family:monospace;'>" + String(t.regAddress) + "</td>";
+                html += "<td style='text-align:center;'>" + String(t.regCount) + "</td>";
+                html += "<td style='text-align:center;'>" + reqBadge + "</td>";
+                html += "<td style='text-align:center;'>" + resBadge + "</td>";
+                html += "<td style='text-align:center;'>" + excStr + "</td>";
+                html += "<td class='mono'>" + String(t.reqHex) + "</td>";
+                html += "<td class='mono'>" + String(t.resHex) + "</td>";
+                html += "</tr>";
+            }
+        }
+        xSemaphoreGive(txLogMutex);
+    } else {
+        html += "<tr><td colspan='13' style='text-align:center;color:#f5b8b8;'>";
+        html += "Error al acceder al log (mutex ocupado).</td></tr>";
+    }
+
+    html += "</table></div></body></html>";
+    webServer.send(200, "text/html", html);
+}
+
+// Exportación del log en formato CSV
+void handleWebLogCsv() {
+    String csv = "#,Tiempo_s,Origen,Destino,UnitID,FuncCode,Registro,Cantidad,";
+    csv += "RequestOK,ResponseOK,ExcCode,BytesRequest,BytesResponse\r\n";
+
+    if (xSemaphoreTake(txLogMutex, pdMS_TO_TICKS(300)) == pdTRUE) {
+        for (int n = 0; n < txLogCount; n++) {
+            int idx = ((txLogHead - 1 - n) % MAX_TX_LOG + MAX_TX_LOG) % MAX_TX_LOG;
+            const ModbusTransaction &t = txLog[idx];
+
+            char fcHex[8];
+            snprintf(fcHex, sizeof(fcHex), "0x%02X", t.funcCode);
+
+            String resStatus;
+            if (!t.responseOk) resStatus = "NO_RESP";
+            else if (t.errorCode != 0) {
+                char tmp[10]; snprintf(tmp, sizeof(tmp), "EXC_0x%02X", t.errorCode);
+                resStatus = String(tmp);
+            } else resStatus = "OK";
+
+            char excHex[8];
+            if (t.errorCode) snprintf(excHex, sizeof(excHex), "0x%02X", t.errorCode);
+            else              snprintf(excHex, sizeof(excHex), "-");
+
+            csv += String(txLogCount - n) + ",";
+            csv += String(t.timestamp) + ",";
+            csv += String(t.clientIP) + ",";
+            csv += String(t.destIP)   + ":502,";
+            csv += String(t.unitID)   + ",";
+            csv += String(fcHex)      + ",";
+            csv += String(t.regAddress) + ",";
+            csv += String(t.regCount)   + ",";
+            csv += (t.requestOk ? "OK" : "MALFORMED") + String(",");
+            csv += resStatus + ",";
+            csv += String(excHex) + ",";
+            csv += "\"" + String(t.reqHex) + "\",";
+            csv += "\"" + String(t.resHex) + "\"";
+            csv += "\r\n";
+        }
+        xSemaphoreGive(txLogMutex);
+    }
+
+    webServer.sendHeader("Content-Disposition", "attachment; filename=modbus_log.csv");
+    webServer.send(200, "text/csv", csv);
+}
+
+// ====================================================================
+// FUNCIONES DE BAJO NIVEL DE RED
+// ====================================================================
 bool readExact(WiFiClient &client, uint8_t* buffer, size_t length, uint32_t timeoutMs) {
     size_t bytesRead = 0; 
     uint32_t startMs = millis();
@@ -610,23 +933,56 @@ void taskModbusProxy(void *parameter) {
             if (!slotFound) newClient.stop();
         }
 
-        // 2. Enrutador Modbus Robust y Reensamblador
+        // 2. Enrutador Modbus - Anti-fragmentación bidireccional + Log de transacciones
         for (int i = 0; i < MAX_CLIENTS; i++) {
             if (clients[i] && clients[i].connected()) {
                 if (clients[i].available() >= 7) { 
+
+                    // ---- REQUEST: leer MBAP completo (7 bytes) ----
                     uint8_t mbap[7];
-                    if (readExact(clients[i], mbap, 7, 500)) {
+                    bool reqMbapOk = readExact(clients[i], mbap, 7, 500);
+
+                    // Preparar entrada de log para esta transacción
+                    ModbusTransaction txEntry;
+                    memset(&txEntry, 0, sizeof(txEntry));
+                    txEntry.timestamp  = millis() / 1000;
+                    txEntry.requestOk  = false;
+                    txEntry.responseOk = false;
+                    txEntry.errorCode  = 0;
+                    strncpy(txEntry.clientIP, clients[i].remoteIP().toString().c_str(), 15);
+                    strncpy(txEntry.destIP,   targetModbusIP.toString().c_str(), 15);
+
+                    if (reqMbapOk) {
                         uint16_t remainingLength = (mbap[4] << 8) | mbap[5];
-                        if (remainingLength > 0 && remainingLength < 260) {
-                            uint16_t pduLen = remainingLength - 1; 
-                            uint8_t* pdu = new uint8_t[pduLen];
-                            
+                        bool reqLenOk = (remainingLength > 0 && remainingLength < 260);
+
+                        if (reqLenOk) {
+                            uint16_t pduLen = remainingLength - 1;
+                            uint8_t* pdu    = new uint8_t[pduLen];
+
+                            // ---- REQUEST: leer PDU completa (anti-fragmentación) ----
                             if (readExact(clients[i], pdu, pduLen, 500)) {
+                                // Extraer metadatos Modbus de la request
+                                txEntry.requestOk  = true;
+                                txEntry.unitID     = mbap[6];
+                                txEntry.funcCode   = (pduLen >= 1) ? pdu[0] : 0;
+                                txEntry.regAddress = (pduLen >= 3) ? ((uint16_t)(pdu[1] << 8) | pdu[2]) : 0;
+                                txEntry.regCount   = (pduLen >= 5) ? ((uint16_t)(pdu[3] << 8) | pdu[4]) : 0;
+
+                                // Ensamblar trama request completa (atómica)
+                                uint16_t totalReqLen = 7 + pduLen;
+                                uint8_t* totalReq    = new uint8_t[totalReqLen];
+                                memcpy(totalReq,     mbap, 7);
+                                memcpy(totalReq + 7, pdu,  pduLen);
+                                bytesToHexStr(totalReq, totalReqLen, txEntry.reqHex, sizeof(txEntry.reqHex));
+
                                 updateClientStats(clients[i].remoteIP());
                                 
                                 if (xSemaphoreTake(backendMutex, pdMS_TO_TICKS(2500)) == pdTRUE) {
+                                    // ---- RECONEXION AL BACKEND si es necesario ----
                                     if (!backendClient.connected()) {
-                                        if (millis() - lastBackendConnectAttempt >= RECONNECT_DELAY || lastBackendConnectAttempt == 0) {
+                                        if (millis() - lastBackendConnectAttempt >= RECONNECT_DELAY
+                                            || lastBackendConnectAttempt == 0) {
                                             lastBackendConnectAttempt = millis();
                                             if (backendClient.connect(targetModbusIP, MODBUS_SERVER_PORT)) {
                                                 currentBackendState = BK_CONNECTED;
@@ -637,42 +993,79 @@ void taskModbusProxy(void *parameter) {
                                     }
 
                                     if (backendClient.connected()) {
-                                        // 🛑 PARCHE ANTI-FRAGMENTACIÓN: Unir trama completa antes de enviar a EMMA
-                                        uint16_t totalReqLen = 7 + pduLen;
-                                        uint8_t* totalReq = new uint8_t[totalReqLen];
-                                        memcpy(totalReq, mbap, 7);
-                                        memcpy(totalReq + 7, pdu, pduLen);
+                                        // ---- ENVIO AL BACKEND: trama atómica completa ----
                                         backendClient.write(totalReq, totalReqLen);
-                                        delete[] totalReq;
                                         
+                                        // ---- RESPUESTA BACKEND: leer MBAP (7 bytes) ----
                                         uint8_t resMbap[7];
-                                        if (readExact(backendClient, resMbap, 7, 500)) {
-                                            uint16_t resRemainingLength = (resMbap[4] << 8) | resMbap[5];
-                                            if (resRemainingLength > 0 && resRemainingLength < 260) {
-                                                uint16_t resPduLen = resRemainingLength - 1; 
-                                                uint8_t* resPdu = new uint8_t[resPduLen];
-                                                if (readExact(backendClient, resPdu, resPduLen, 500)) {
-                                                    // 🛑 PARCHE ANTI-FRAGMENTACIÓN: Unir trama completa antes de reenviar al Cliente
+                                        if (readExact(backendClient, resMbap, 7, 1000)) {
+                                            uint16_t resRemLen = (resMbap[4] << 8) | resMbap[5];
+
+                                            // Validar longitud MBAP respuesta
+                                            if (resRemLen > 0 && resRemLen < 260) {
+                                                uint16_t resPduLen = resRemLen - 1;
+                                                uint8_t* resPdu    = new uint8_t[resPduLen];
+
+                                                // ---- RESPUESTA BACKEND: leer PDU completa (anti-fragmentación) ----
+                                                if (readExact(backendClient, resPdu, resPduLen, 1000)) {
+                                                    txEntry.responseOk = true;
+
+                                                    // Detectar excepción Modbus (bit 7 del funcCode activo)
+                                                    if (resPduLen >= 2 && (resPdu[0] & 0x80)) {
+                                                        txEntry.errorCode = resPdu[1];
+                                                    }
+
+                                                    // Ensamblar trama respuesta completa (atómica)
                                                     uint16_t totalResLen = 7 + resPduLen;
-                                                    uint8_t* totalRes = new uint8_t[totalResLen];
-                                                    memcpy(totalRes, resMbap, 7);
-                                                    memcpy(totalRes + 7, resPdu, resPduLen);
+                                                    uint8_t* totalRes    = new uint8_t[totalResLen];
+                                                    memcpy(totalRes,     resMbap, 7);
+                                                    memcpy(totalRes + 7, resPdu,  resPduLen);
+                                                    bytesToHexStr(totalRes, totalResLen, txEntry.resHex, sizeof(txEntry.resHex));
+
+                                                    // ---- REENVIO AL CLIENTE: trama atómica completa ----
                                                     clients[i].write(totalRes, totalResLen);
                                                     delete[] totalRes;
+                                                } else {
+                                                    // Timeout leyendo PDU de respuesta del backend
+                                                    txEntry.responseOk = false;
+                                                    backendClient.stop();
+                                                    currentBackendState = BK_STANDBY;
                                                 }
                                                 delete[] resPdu;
+                                            } else {
+                                                // MBAP de respuesta inválido
+                                                txEntry.responseOk = false;
+                                                backendClient.stop();
+                                                currentBackendState = BK_STANDBY;
                                             }
-                                        } else { 
-                                            backendClient.stop(); 
-                                            currentBackendState = BK_STANDBY; 
+                                        } else {
+                                            // Timeout esperando MBAP de respuesta del backend
+                                            txEntry.responseOk = false;
+                                            backendClient.stop();
+                                            currentBackendState = BK_STANDBY;
                                         }
                                     }
                                     xSemaphoreGive(backendMutex); 
                                 }
+                                delete[] totalReq;
+                            } else {
+                                // No se pudo leer la PDU completa de la request
+                                txEntry.requestOk = false;
+                                bytesToHexStr(mbap, 7, txEntry.reqHex, sizeof(txEntry.reqHex));
                             }
                             delete[] pdu;
+                        } else {
+                            // Longitud MBAP inválida
+                            txEntry.requestOk = false;
+                            bytesToHexStr(mbap, 7, txEntry.reqHex, sizeof(txEntry.reqHex));
                         }
+                    } else {
+                        // No se pudo leer el MBAP de la request
+                        txEntry.requestOk = false;
                     }
+
+                    // Registrar transacción en el log circular
+                    logTransaction(txEntry);
                 }
             }
         }
