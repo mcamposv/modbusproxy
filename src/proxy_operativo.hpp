@@ -7,22 +7,74 @@
 #include <ESP32Ping.h> 
 #include <WebServer.h> 
 #include <ArduinoOTA.h> 
-#include "secrets.h"
+#include <Preferences.h>
+#include "secrets.h"   // Valores default del primer arranque — EXCLUIDO DE GIT
 #include <esp_wifi.h>
 #include <esp_log.h>
 
 // ====================================================================
-// CONFIGURACIÓN PARAMETRIZABLE
+// CONFIGURACIÓN PERSISTENTE EN NVS (Non-Volatile Storage)
+// Todos los valores arrancan con los defaults del firmware.
+// Cualquier cambio desde la web se guarda en flash y sobrevive reinicios.
 // ====================================================================
-const bool USE_ETHERNET       = false;  
-const bool USE_DHCP           = false;   
-const bool ROTATE_SCREEN      = false;  
+Preferences prefs;
 
-// Configuración de red local estática de rescate
-IPAddress local_IP(192, 168, 254, 213);
-IPAddress gateway(192, 168, 254, 252);
-IPAddress subnet(255, 255, 255, 0);
-IPAddress dns_primary(192, 168, 254, 252);
+struct AppConfig {
+    bool   useEthernet      = false;
+    bool   useDHCP          = false;
+    bool   rotateScreen     = false;
+    char   wifiSSID[64]     = DEFAULT_WIFI_SSID;      // <- secrets.h
+    char   wifiPass[64]     = DEFAULT_WIFI_PASSWORD;   // <- secrets.h
+    char   modbusIP[16]     = DEFAULT_MODBUS_IP;       // <- secrets.h
+    uint16_t modbusPort     = DEFAULT_MODBUS_PORT;     // <- secrets.h
+    char   localIP[16]      = "192.168.254.213";
+    char   gateway[16]      = "192.168.254.252";
+    char   subnet[16]       = "255.255.255.0";
+    char   dns[16]          = "192.168.254.252";
+    char   otaPassword[32]  = DEFAULT_OTA_PASSWORD;    // <- secrets.h
+};
+
+AppConfig cfg;
+
+void loadConfig() {
+    prefs.begin("proxycfg", true); // read-only
+    cfg.useEthernet  = prefs.getBool  ("useEth",     false);
+    cfg.useDHCP      = prefs.getBool  ("useDHCP",    false);
+    cfg.rotateScreen = prefs.getBool  ("rotScr",     false);
+    prefs.getString("wifiSSID",  cfg.wifiSSID,    sizeof(cfg.wifiSSID));
+    prefs.getString("wifiPass",  cfg.wifiPass,    sizeof(cfg.wifiPass));
+    prefs.getString("modbusIP",  cfg.modbusIP,    sizeof(cfg.modbusIP));
+    cfg.modbusPort   = prefs.getUShort("modbusPort", 502);
+    prefs.getString("localIP",   cfg.localIP,     sizeof(cfg.localIP));
+    prefs.getString("gateway",   cfg.gateway,     sizeof(cfg.gateway));
+    prefs.getString("subnet",    cfg.subnet,      sizeof(cfg.subnet));
+    prefs.getString("dns",       cfg.dns,         sizeof(cfg.dns));
+    prefs.getString("otaPass",   cfg.otaPassword, sizeof(cfg.otaPassword));
+    prefs.end();
+}
+
+void saveConfig() {
+    prefs.begin("proxycfg", false); // read-write
+    prefs.putBool  ("useEth",     cfg.useEthernet);
+    prefs.putBool  ("useDHCP",    cfg.useDHCP);
+    prefs.putBool  ("rotScr",     cfg.rotateScreen);
+    prefs.putString("wifiSSID",   cfg.wifiSSID);
+    prefs.putString("wifiPass",   cfg.wifiPass);
+    prefs.putString("modbusIP",   cfg.modbusIP);
+    prefs.putUShort("modbusPort", cfg.modbusPort);
+    prefs.putString("localIP",    cfg.localIP);
+    prefs.putString("gateway",    cfg.gateway);
+    prefs.putString("subnet",     cfg.subnet);
+    prefs.putString("dns",        cfg.dns);
+    prefs.putString("otaPass",    cfg.otaPassword);
+    prefs.end();
+}
+
+// IPs en tiempo de ejecucion (se rellenan desde cfg al arrancar)
+IPAddress local_IP;
+IPAddress gateway_IP;
+IPAddress subnet_IP;
+IPAddress dns_IP;
 IPAddress targetModbusIP;
 
 const int BOTON_OK    = 4;
@@ -30,13 +82,11 @@ const int BOTON_BACK  = 14;
 const int BOTON_MAS   = 15;
 const int BOTON_MENOS = 39;
 
-const uint8_t MODBUS_FIXED_ID = 0;      
-const uint16_t MODBUS_TEST_REG = 30000; 
-//const uint32_t RECONNECT_DELAY = 5000;  
+const uint8_t  MODBUS_FIXED_ID = 0;
+const uint16_t MODBUS_TEST_REG = 30000;
 const uint32_t RECONNECT_DELAY = 100;
 
-// Versión del Firmware configurable desde arriba
-const String FIRMWARE_VERSION  = "4.5.0"; 
+const String FIRMWARE_VERSION = "4.5.0";
 // ====================================================================
 
 // Máquina de estados extendida
@@ -165,12 +215,14 @@ void handleWebShutdown();
 void handleApiStatus(); 
 void handleWebLog();
 void handleWebLogCsv();
+void handleWebConfig();
+void handleWebConfigSave();
 String buildNavBar(const String &activePage);
 
 void setupOTA() {
     ArduinoOTA.setPort(3232);
     ArduinoOTA.setHostname("Proxy-Huawei");
-    ArduinoOTA.setPassword(OTA_PASSWORD);
+    ArduinoOTA.setPassword(cfg.otaPassword);
 
     ArduinoOTA.onStart([]() {
         otaInProgress = true; 
@@ -238,14 +290,19 @@ void setupOTA() {
 }
 
 void setup() {
-    // Inicializar el puerto serie lo antes posible y silenciar
-    // inmediatamente todos los logs internos del SDK de Espressif.
-    // Sin esto, WiFi stack, mDNS y ArduinoOTA vuelcan texto y binario
-    // por UART0 mezclado con nuestra salida de diagnóstico.
     Serial.begin(115200);
     esp_log_level_set("*", ESP_LOG_NONE);
 
-    targetModbusIP.fromString(MODBUS_SERVER_IP);
+    // Cargar configuracion persistente desde NVS.
+    // Si es el primer arranque, el struct ya tiene los defaults del firmware.
+    loadConfig();
+
+    // Convertir strings de cfg a objetos IPAddress para el stack de red
+    local_IP.fromString(cfg.localIP);
+    gateway_IP.fromString(cfg.gateway);
+    subnet_IP.fromString(cfg.subnet);
+    dns_IP.fromString(cfg.dns);
+    targetModbusIP.fromString(cfg.modbusIP);
     pinMode(BOTON_OK, INPUT_PULLUP); pinMode(BOTON_BACK, INPUT_PULLUP);
     pinMode(BOTON_MAS, INPUT_PULLUP); pinMode(BOTON_MENOS, INPUT); 
 
@@ -260,22 +317,24 @@ void setup() {
     display.println("Modbus TCP v3.2 (HA)"); 
     display.display();
 
-    if (USE_ETHERNET) {
+    if (cfg.useEthernet) {
         ETH.begin(1, 16, 23, 18, ETH_PHY_LAN8720, ETH_CLOCK_GPIO0_IN);
-        if (!USE_DHCP) ETH.config(local_IP, gateway, subnet, dns_primary);
+        if (!cfg.useDHCP) ETH.config(local_IP, gateway_IP, subnet_IP, dns_IP);
     } else {
-        if (!USE_DHCP) WiFi.config(local_IP, gateway, subnet, dns_primary);
-        WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+        if (!cfg.useDHCP) WiFi.config(local_IP, gateway_IP, subnet_IP, dns_IP);
+        WiFi.begin(cfg.wifiSSID, cfg.wifiPass);
     }
     
     delay(500); 
     setupOTA(); 
 
-    webServer.on("/",          handleWebRoot);
-    webServer.on("/apagar",    handleWebShutdown);
-    webServer.on("/api/status",handleApiStatus);
-    webServer.on("/log",       handleWebLog);
-    webServer.on("/log.csv",   handleWebLogCsv);
+    webServer.on("/",            handleWebRoot);
+    webServer.on("/apagar",      handleWebShutdown);
+    webServer.on("/api/status",  handleApiStatus);
+    webServer.on("/log",         handleWebLog);
+    webServer.on("/log.csv",     handleWebLogCsv);
+    webServer.on("/config",      HTTP_GET,  handleWebConfig);
+    webServer.on("/config/save", HTTP_POST, handleWebConfigSave);
     webServer.begin();
 
     backendMutex = xSemaphoreCreateMutex();
@@ -289,16 +348,16 @@ void setup() {
     Serial.println("  PROXY MODBUS TCP v" + FIRMWARE_VERSION);
     Serial.println("============================================");
 
-    if (USE_ETHERNET) {
+    if (cfg.useEthernet) {
         uint8_t mac[6];
         esp_read_mac(mac, ESP_MAC_ETH);
         Serial.printf("  Interfaz : ETHERNET (LAN8720)\n");
         Serial.printf("  MAC      : %02X:%02X:%02X:%02X:%02X:%02X\n",
                       mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
-        if (!USE_DHCP) {
+        if (!cfg.useDHCP) {
             Serial.print("  IP       : "); Serial.println(local_IP.toString());
-            Serial.print("  Subnet   : "); Serial.println(subnet.toString());
-            Serial.print("  Gateway  : "); Serial.println(gateway.toString());
+            Serial.print("  Subnet   : "); Serial.println(subnet_IP.toString());
+            Serial.print("  Gateway  : "); Serial.println(gateway_IP.toString());
         } else {
             Serial.println("  IP       : Esperando DHCP...");
         }
@@ -306,10 +365,9 @@ void setup() {
         uint8_t mac[6];
         esp_wifi_get_mac(WIFI_IF_STA, mac);
         Serial.printf("  Interfaz : WIFI (STA)\n");
-        Serial.printf("  SSID     : %s\n", WIFI_SSID);
+        Serial.printf("  SSID     : %s\n", cfg.wifiSSID);
         Serial.printf("  MAC      : %02X:%02X:%02X:%02X:%02X:%02X\n",
                       mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
-        // Esperar hasta 10 s a que la conexión WiFi suba (static ya debería estar)
         uint32_t t0 = millis();
         while (WiFi.status() != WL_CONNECTED && millis() - t0 < 10000) delay(200);
         if (WiFi.status() == WL_CONNECTED) {
@@ -321,7 +379,7 @@ void setup() {
         }
     }
     Serial.print("  Destino  : ");
-    Serial.print(MODBUS_SERVER_IP); Serial.print(":"); Serial.println(MODBUS_SERVER_PORT);
+    Serial.print(cfg.modbusIP); Serial.print(":"); Serial.println(cfg.modbusPort);
     Serial.println("============================================");
     Serial.println();
 
@@ -356,10 +414,9 @@ void loop() {
 String buildNavBar(const String &activePage) {
     String nav = "<nav style='background:#1a1a2e;padding:10px 20px;display:flex;";
     nav += "gap:12px;align-items:center;border-bottom:2px solid #4da6ff;";
-    nav += "position:sticky;top:0;z-index:999;'>";
+    nav += "position:sticky;top:0;z-index:999;flex-wrap:wrap;'>";
     nav += "<span style='color:#4da6ff;font-weight:700;font-size:15px;margin-right:10px;'>&#9641; PROXY MODBUS</span>";
 
-    // Lambda para generar cada enlace de navegación
     auto navLink = [&](const String &href, const String &label, const String &page) -> String {
         bool active = (activePage == page);
         String s = "<a href='" + href + "' style='color:";
@@ -372,10 +429,233 @@ String buildNavBar(const String &activePage) {
         return s;
     };
 
-    nav += navLink("/",    "Dashboard",  "dashboard");
-    nav += navLink("/log", "Log Modbus", "log");
+    nav += navLink("/",       "Dashboard",     "dashboard");
+    nav += navLink("/log",    "Log Modbus",    "log");
+    nav += navLink("/config", "Configuracion", "config");
     nav += "</nav>";
     return nav;
+}
+
+// ====================================================================
+// PÁGINA WEB: CONFIGURACIÓN PERSISTENTE
+// ====================================================================
+
+// Escapa caracteres especiales HTML para valores de atributos de formulario
+String htmlEscape(const char* s) {
+    String out;
+    for (size_t i = 0; s[i]; i++) {
+        char c = s[i];
+        if      (c == '&')  out += "&amp;";
+        else if (c == '"')  out += "&quot;";
+        else if (c == '<')  out += "&lt;";
+        else if (c == '>')  out += "&gt;";
+        else                out += c;
+    }
+    return out;
+}
+
+void handleWebConfig() {
+    String html = "<!DOCTYPE html><html lang='es'><head><meta charset='UTF-8'>";
+    html += "<meta name='viewport' content='width=device-width, initial-scale=1.0'>";
+    html += "<title>Configuracion - Proxy Modbus</title>";
+    html += "<style>";
+    html += "*{box-sizing:border-box;}";
+    html += "body{background:#121212;color:#e0e0e0;font-family:'Segoe UI',sans-serif;margin:0;padding:0;}";
+    html += ".wrap{max-width:700px;margin:20px auto;padding:0 16px 40px;}";
+    html += "h1{color:#4da6ff;border-bottom:1px solid #333;padding-bottom:8px;margin-top:0;}";
+    html += "h3{color:#a0c4ff;border-bottom:1px solid #222;padding-bottom:6px;margin-top:28px;}";
+    html += ".form-group{margin-bottom:18px;}";
+    html += "label{display:block;font-size:13px;color:#aaa;margin-bottom:5px;font-weight:600;}";
+    html += "input[type=text],input[type=password],input[type=number]";
+    html += "{width:100%;padding:9px 12px;background:#1e1e1e;border:1px solid #333;";
+    html += "color:#e0e0e0;border-radius:5px;font-size:14px;}";
+    html += "input:focus{outline:none;border-color:#4da6ff;";
+    html += "box-shadow:0 0 0 2px rgba(77,166,255,0.2);}";
+    html += ".radio-group{display:flex;gap:20px;margin-top:4px;}";
+    html += ".radio-group label{display:flex;align-items:center;gap:6px;font-size:14px;";
+    html += "color:#e0e0e0;font-weight:400;cursor:pointer;}";
+    html += ".section-note{font-size:12px;color:#666;margin-top:4px;}";
+    html += ".btn-save{display:block;width:100%;padding:12px;background:#28a745;color:#fff;";
+    html += "border:none;border-radius:6px;font-size:16px;font-weight:700;cursor:pointer;margin-top:28px;}";
+    html += ".btn-save:hover{background:#1e8035;}";
+    html += ".warn{background:#3d2f00;border:1px solid #f39c12;color:#ffe082;";
+    html += "padding:12px 16px;border-radius:6px;margin-bottom:20px;font-size:14px;}";
+    html += "</style></head><body>";
+    html += buildNavBar("config");
+    html += "<div class='wrap'>";
+    html += "<h1>&#9881; Configuracion del Proxy</h1>";
+    html += "<div class='warn'>&#9888; Los cambios se aplican en el <strong>siguiente reinicio</strong>. ";
+    html += "El dispositivo se reiniciara automaticamente al guardar.</div>";
+
+    html += "<form method='POST' action='/config/save'>";
+
+    // ---- SECCIÓN: INTERFAZ DE RED ----
+    html += "<h3>Interfaz de Red</h3>";
+
+    html += "<div class='form-group'>";
+    html += "<label>Tipo de conexion</label>";
+    html += "<div class='radio-group'>";
+    html += "<label><input type='radio' name='useEth' value='0'";
+    html += (!cfg.useEthernet ? " checked" : "");
+    html += "> WiFi (inalambrico)</label>";
+    html += "<label><input type='radio' name='useEth' value='1'";
+    html += (cfg.useEthernet ? " checked" : "");
+    html += "> Ethernet (cable RJ45)</label>";
+    html += "</div></div>";
+
+    html += "<div class='form-group'>";
+    html += "<label>Asignacion de IP</label>";
+    html += "<div class='radio-group'>";
+    html += "<label><input type='radio' name='useDHCP' value='0'";
+    html += (!cfg.useDHCP ? " checked" : "");
+    html += "> IP Estatica</label>";
+    html += "<label><input type='radio' name='useDHCP' value='1'";
+    html += (cfg.useDHCP ? " checked" : "");
+    html += "> DHCP (automatica)</label>";
+    html += "</div></div>";
+
+    html += "<div class='form-group'>";
+    html += "<label>Rotar pantalla OLED 180 grados</label>";
+    html += "<div class='radio-group'>";
+    html += "<label><input type='radio' name='rotScr' value='0'";
+    html += (!cfg.rotateScreen ? " checked" : "");
+    html += "> No</label>";
+    html += "<label><input type='radio' name='rotScr' value='1'";
+    html += (cfg.rotateScreen ? " checked" : "");
+    html += "> Si</label>";
+    html += "</div></div>";
+
+    // ---- SECCIÓN: CREDENCIALES WIFI ----
+    html += "<h3>Credenciales WiFi</h3>";
+    html += "<p class='section-note'>Solo se usan si la conexion seleccionada es WiFi.</p>";
+
+    html += "<div class='form-group'>";
+    html += "<label for='wifiSSID'>SSID (nombre de la red WiFi)</label>";
+    html += "<input type='text' id='wifiSSID' name='wifiSSID' maxlength='63' value='";
+    html += htmlEscape(cfg.wifiSSID);
+    html += "'></div>";
+
+    html += "<div class='form-group'>";
+    html += "<label for='wifiPass'>Contrasena WiFi</label>";
+    html += "<input type='password' id='wifiPass' name='wifiPass' maxlength='63' value='";
+    html += htmlEscape(cfg.wifiPass);
+    html += "'></div>";
+
+    // ---- SECCIÓN: DESTINO MODBUS ----
+    html += "<h3>Destino Modbus TCP (EMMA / Inversor)</h3>";
+
+    html += "<div class='form-group'>";
+    html += "<label for='modbusIP'>IP del servidor Modbus</label>";
+    html += "<input type='text' id='modbusIP' name='modbusIP' maxlength='15' value='";
+    html += htmlEscape(cfg.modbusIP);
+    html += "'></div>";
+
+    html += "<div class='form-group'>";
+    html += "<label for='modbusPort'>Puerto Modbus TCP</label>";
+    html += "<input type='number' id='modbusPort' name='modbusPort' min='1' max='65535' value='";
+    html += String(cfg.modbusPort);
+    html += "'></div>";
+
+    // ---- SECCIÓN: RED ESTÁTICA ----
+    html += "<h3>Red Estatica del Proxy</h3>";
+    html += "<p class='section-note'>Solo se usa si la asignacion de IP es Estatica.</p>";
+
+    html += "<div class='form-group'>";
+    html += "<label for='localIP'>IP del Proxy (este dispositivo)</label>";
+    html += "<input type='text' id='localIP' name='localIP' maxlength='15' value='";
+    html += htmlEscape(cfg.localIP);
+    html += "'></div>";
+
+    html += "<div class='form-group'>";
+    html += "<label for='gw'>Puerta de enlace (Gateway)</label>";
+    html += "<input type='text' id='gw' name='gw' maxlength='15' value='";
+    html += htmlEscape(cfg.gateway);
+    html += "'></div>";
+
+    html += "<div class='form-group'>";
+    html += "<label for='sn'>Mascara de subred (Subnet)</label>";
+    html += "<input type='text' id='sn' name='sn' maxlength='15' value='";
+    html += htmlEscape(cfg.subnet);
+    html += "'></div>";
+
+    html += "<div class='form-group'>";
+    html += "<label for='dns'>DNS primario</label>";
+    html += "<input type='text' id='dns' name='dns' maxlength='15' value='";
+    html += htmlEscape(cfg.dns);
+    html += "'></div>";
+
+    // ---- SECCIÓN: OTA ----
+    html += "<h3>Actualizacion OTA</h3>";
+
+    html += "<div class='form-group'>";
+    html += "<label for='otaPass'>Contrasena OTA</label>";
+    html += "<input type='password' id='otaPass' name='otaPass' maxlength='31' value='";
+    html += htmlEscape(cfg.otaPassword);
+    html += "'></div>";
+
+    html += "<button type='submit' class='btn-save'>&#128190; Guardar y Reiniciar</button>";
+    html += "</form>";
+    html += "</div></body></html>";
+
+    webServer.send(200, "text/html", html);
+}
+
+void handleWebConfigSave() {
+    // Leer todos los campos POST y volcarlos en cfg
+    cfg.useEthernet  = (webServer.arg("useEth")  == "1");
+    cfg.useDHCP      = (webServer.arg("useDHCP") == "1");
+    cfg.rotateScreen = (webServer.arg("rotScr")  == "1");
+
+    String val;
+
+    val = webServer.arg("wifiSSID"); val.trim();
+    if (val.length() > 0) strncpy(cfg.wifiSSID, val.c_str(), sizeof(cfg.wifiSSID) - 1);
+
+    // La contrasena puede estar vacia (redes abiertas)
+    val = webServer.arg("wifiPass");
+    strncpy(cfg.wifiPass, val.c_str(), sizeof(cfg.wifiPass) - 1);
+
+    val = webServer.arg("modbusIP"); val.trim();
+    if (val.length() > 0) strncpy(cfg.modbusIP, val.c_str(), sizeof(cfg.modbusIP) - 1);
+
+    int port = webServer.arg("modbusPort").toInt();
+    if (port > 0 && port <= 65535) cfg.modbusPort = (uint16_t)port;
+
+    val = webServer.arg("localIP"); val.trim();
+    if (val.length() > 0) strncpy(cfg.localIP, val.c_str(), sizeof(cfg.localIP) - 1);
+
+    val = webServer.arg("gw"); val.trim();
+    if (val.length() > 0) strncpy(cfg.gateway, val.c_str(), sizeof(cfg.gateway) - 1);
+
+    val = webServer.arg("sn"); val.trim();
+    if (val.length() > 0) strncpy(cfg.subnet, val.c_str(), sizeof(cfg.subnet) - 1);
+
+    val = webServer.arg("dns"); val.trim();
+    if (val.length() > 0) strncpy(cfg.dns, val.c_str(), sizeof(cfg.dns) - 1);
+
+    val = webServer.arg("otaPass"); val.trim();
+    if (val.length() > 0) strncpy(cfg.otaPassword, val.c_str(), sizeof(cfg.otaPassword) - 1);
+
+    saveConfig();
+    Serial.println("[CFG] Configuracion guardada en NVS. Reiniciando...");
+
+    // Responder al navegador antes del reinicio
+    String html = "<!DOCTYPE html><html lang='es'><head><meta charset='UTF-8'>";
+    html += "<meta name='viewport' content='width=device-width, initial-scale=1.0'>";
+    html += "<meta http-equiv='refresh' content='6;url=/'>"; // Redirige al dashboard tras 6s
+    html += "<title>Guardando...</title>";
+    html += "<style>body{background:#121212;color:#fff;font-family:sans-serif;";
+    html += "text-align:center;padding-top:15%;}h1{color:#28a745;}</style>";
+    html += "</head><body>";
+    html += "<h1>&#128190; Configuracion guardada</h1>";
+    html += "<p>El dispositivo se esta reiniciando...</p>";
+    html += "<p style='color:#888;font-size:13px;'>";
+    html += "Seras redirigido al Dashboard en 6 segundos.</p>";
+    html += "</body></html>";
+    webServer.send(200, "text/html", html);
+
+    delay(1500); // Tiempo para que el navegador reciba la respuesta
+    ESP.restart();
 }
 
 // ====================================================================
@@ -768,7 +1048,7 @@ void taskModbusProxy(void *parameter) {
         }
 
         bool tieneNetActiva = false;
-        if (USE_ETHERNET) {
+        if (cfg.useEthernet) {
             if (ETH.localIP() != IPAddress(0,0,0,0)) tieneNetActiva = true;
         } else {
             if (WiFi.status() == WL_CONNECTED) tieneNetActiva = true;
@@ -814,7 +1094,7 @@ void taskModbusProxy(void *parameter) {
                 if (xSemaphoreTake(backendMutex, pdMS_TO_TICKS(3000)) == pdTRUE) {
                     if (backendClient.connected()) backendClient.stop(); 
                     
-                    if (backendClient.connect(targetModbusIP, MODBUS_SERVER_PORT)) {
+                    if (backendClient.connect(targetModbusIP, cfg.modbusPort)) {
                         emmaDebugStage = "Conectado TCP con éxito. Inyectando Query Modbus...";
                         
                         uint8_t reqFrame[] = { 0x00, 0x01, 0x00, 0x00, 0x00, 0x06, MODBUS_FIXED_ID, 0x03, 0x75, 0x30, 0x00, 0x0F };
@@ -984,7 +1264,7 @@ void taskModbusProxy(void *parameter) {
                                         if (millis() - lastBackendConnectAttempt >= RECONNECT_DELAY
                                             || lastBackendConnectAttempt == 0) {
                                             lastBackendConnectAttempt = millis();
-                                            if (backendClient.connect(targetModbusIP, MODBUS_SERVER_PORT)) {
+                                            if (backendClient.connect(targetModbusIP, cfg.modbusPort)) {
                                                 currentBackendState = BK_CONNECTED;
                                             } else {
                                                 currentBackendState = BK_CON_ERR; 
@@ -1158,7 +1438,7 @@ void renderUI() {
     String ipStr = "Conectando...";
     bool tieneNet = false;
     
-    if (USE_ETHERNET) {
+    if (cfg.useEthernet) {
         if (ETH.localIP() != IPAddress(0,0,0,0)) {
             ipStr = ETH.localIP().toString();
             tieneNet = true;
@@ -1342,7 +1622,7 @@ void ejecutarTestModbusFijo() {
     diagnosticResult = "Lanzando ID " + String(MODBUS_FIXED_ID) + "..."; renderUI();
     if (xSemaphoreTake(backendMutex, pdMS_TO_TICKS(3000)) == pdTRUE) {
         if (backendClient.connected()) backendClient.stop();
-        if (backendClient.connect(targetModbusIP, MODBUS_SERVER_PORT)) {
+        if (backendClient.connect(targetModbusIP, cfg.modbusPort)) {
             uint8_t reqFrame[] = { 0x00, 0x01, 0x00, 0x00, 0x00, 0x06, MODBUS_FIXED_ID, 0x03, 0x75, 0x30, 0x00, 0x0F };
             backendClient.write(reqFrame, 12);
             uint8_t resMbap[7];
@@ -1401,7 +1681,7 @@ void ejecutarEscanerModbus() {
 
             if (backendClient.connected()) backendClient.stop();
             
-            if (backendClient.connect(targetModbusIP, MODBUS_SERVER_PORT)) {
+            if (backendClient.connect(targetModbusIP, cfg.modbusPort)) {
                 uint8_t reqFrame[] = { 0x00, 0x01, 0x00, 0x00, 0x00, 0x06, idActual, 0x03, 0x75, 0x30, 0x00, 0x0F };
                 backendClient.write(reqFrame, 12);
                 
