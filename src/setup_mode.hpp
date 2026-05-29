@@ -151,21 +151,33 @@ static void handleSetupRoot() {
     // ---- IP Estatica ----
     html += F("<div id='staticSection' style='display:none'>");
     html += F("<div class='form-group'><label class='lbl' for='localIP'>IP del Proxy (este dispositivo)</label>");
-    html += F("<input type='text' id='localIP' name='localIP' maxlength='15' placeholder='192.168.1.x'></div>");
+    html += "<input type='text' id='localIP' name='localIP' maxlength='15' value='";
+    html += cfg.localIP;
+    html += F("'></div>");
     html += F("<div class='form-group'><label class='lbl' for='gw'>Puerta de enlace (Gateway)</label>");
-    html += F("<input type='text' id='gw' name='gw' maxlength='15' placeholder='192.168.1.1'></div>");
+    html += "<input type='text' id='gw' name='gw' maxlength='15' value='";
+    html += cfg.gateway;
+    html += F("'></div>");
     html += F("<div class='form-group'><label class='lbl' for='sn'>Mascara de subred</label>");
-    html += F("<input type='text' id='sn' name='sn' maxlength='15' placeholder='255.255.255.0'></div>");
+    html += "<input type='text' id='sn' name='sn' maxlength='15' value='";
+    html += cfg.subnet;
+    html += F("'></div>");
     html += F("<div class='form-group'><label class='lbl' for='dns'>DNS primario</label>");
-    html += F("<input type='text' id='dns' name='dns' maxlength='15' placeholder='8.8.8.8'></div>");
+    html += "<input type='text' id='dns' name='dns' maxlength='15' value='";
+    html += cfg.dns;
+    html += F("'></div>");
     html += F("</div>"); // fin staticSection
 
     // ---- Destino Modbus ----
     html += F("<h3>Destino Modbus TCP (EMMA / Inversor)</h3>");
     html += F("<div class='form-group'><label class='lbl' for='modbusIP'>IP del servidor Modbus</label>");
-    html += F("<input type='text' id='modbusIP' name='modbusIP' maxlength='15' placeholder='192.168.1.100'></div>");
+    html += "<input type='text' id='modbusIP' name='modbusIP' maxlength='15' value='";
+    html += cfg.modbusIP;
+    html += F("'></div>");
     html += F("<div class='form-group'><label class='lbl' for='modbusPort'>Puerto Modbus TCP</label>");
-    html += F("<input type='number' id='modbusPort' name='modbusPort' min='1' max='65535' value='502'></div>");
+    html += "<input type='number' id='modbusPort' name='modbusPort' min='1' max='65535' value='";
+    html += String(cfg.modbusPort);
+    html += F("'></div>");
 
     html += F("<button type='submit' class='btn-save'>&#128190; Guardar y Reiniciar</button>");
     html += F("</form>");
@@ -310,8 +322,6 @@ static void handleSetupSave() {
     int port = setupWebServer.arg("modbusPort").toInt();
     if (port > 0 && port <= 65535) p.putUShort("modbusPort", (uint16_t)port);
 
-    // Marcar dispositivo como configurado y limpiar flags de setup
-    p.putBool("cfgOk",    true);
     p.putBool("runSetup", false);
     p.end();
 

@@ -2,6 +2,42 @@ Import("env")
 import os
 import re
 import sys
+import glob
+import subprocess
+
+# ── Particion NVS en el partition table por defecto del ESP32 ──────────────
+NVS_ADDR = "0x9000"
+NVS_SIZE = "0x5000"
+
+def find_esptool():
+    home = os.path.expanduser("~")
+    hits = glob.glob(os.path.join(home, ".platformio", "packages", "tool-esptoolpy*", "esptool.py"))
+    return hits[0] if hits else None
+
+def detect_serial_port():
+    """Devuelve el primer puerto USB serie detectado, ignorando puertos de sistema."""
+    try:
+        r = subprocess.run(["pio", "device", "list", "--serial"],
+                           capture_output=True, text=True)
+        for line in r.stdout.splitlines():
+            line = line.strip()
+            port = line.split()[0] if line else ""
+            # Solo puertos USB — excluir /dev/ttyS* (puertos serie de sistema)
+            if (port.startswith("/dev/ttyUSB")   # Linux USB-serial (CH340, CP2102...)
+                    or port.startswith("/dev/ttyACM")  # Linux USB-CDC (Arduino Nano, etc.)
+                    or port.startswith("/dev/cu.")     # macOS
+                    or (len(port) >= 4 and port[:3].upper() == "COM")):  # Windows
+                return port
+    except Exception:
+        pass
+    return None
+
+def erase_nvs(port):
+    esptool_path = find_esptool()
+    esptool_cmd  = [sys.executable, esptool_path] if esptool_path else [sys.executable, "-m", "esptool"]
+    cmd = esptool_cmd + ["--port", port, "--baud", "921600", "erase_region", NVS_ADDR, NVS_SIZE]
+    print("\n>>> " + " ".join(cmd))
+    return subprocess.run(cmd).returncode
 
 # ---------------------------------------------------------------------------
 # Helpers de extraccion
@@ -122,6 +158,7 @@ def ask_for_confirmation(source, target, env):
         proxy_content,
         r'const\s+String\s+FIRMWARE_VERSION\s*=\s*"([^"]+)"'
     )
+
 
     # -----------------------------------------------------------------------
     # Leer configuracion de red desde el struct AppConfig de proxy_operativo.hpp
@@ -251,21 +288,53 @@ def ask_for_confirmation(source, target, env):
     sys.stdout.flush()
 
     # -----------------------------------------------------------------------
-    # Confirmacion interactiva
+    # Pregunta 1: ¿Flashear?
     # -----------------------------------------------------------------------
-    print("  Son estos datos correctos para subir el firmware? [s/N]: ")
+    print("  Flashear ahora? [S/n]: ")
     sys.stdout.flush()
-
     try:
-        respuesta = sys.stdin.readline().strip()
+        resp_flash = sys.stdin.readline().strip().lower()
     except KeyboardInterrupt:
-        respuesta = "n"
+        resp_flash = "n"
 
-    if respuesta.lower() not in ["s", "si", "y", "yes"]:
+    if resp_flash in ["n", "no"]:
         sys.stderr.write("\n  Subida CANCELADA por el usuario.\n\n")
         env.Exit(1)
-    else:
-        sys.stderr.write("\n  Confirmado. Compilando y subiendo...\n\n")
+        return
+
+    # -----------------------------------------------------------------------
+    # Pregunta 2: ¿Forzar Setup? (solo para subidas USB, no OTA)
+    # -----------------------------------------------------------------------
+    if upload_proto != "espota":
+        print("  Forzar modo Setup en el proximo arranque? [s/N]: ")
+        sys.stdout.flush()
+        try:
+            resp_setup = sys.stdin.readline().strip().lower()
+        except KeyboardInterrupt:
+            resp_setup = "n"
+
+        if resp_setup in ["s", "si", "y", "yes"]:
+            port = upload_port if upload_port != "(USB / auto)" else detect_serial_port()
+            if not port:
+                sys.stderr.write("\n  [!] No se pudo detectar el puerto. Introduce el puerto manualmente: ")
+                sys.stdout.flush()
+                port = sys.stdin.readline().strip()
+
+            if port:
+                sys.stderr.write(f"\n  [i] Borrando NVS en {port}...\n")
+                ret = erase_nvs(port)
+                if ret == 0:
+                    sys.stderr.write("  [OK] NVS borrada. El dispositivo entrara en modo Setup.\n\n")
+                else:
+                    sys.stderr.write("  [ERROR] No se pudo borrar la NVS. Abortando.\n\n")
+                    env.Exit(1)
+                    return
+            else:
+                sys.stderr.write("  [ERROR] Puerto no especificado. Abortando.\n\n")
+                env.Exit(1)
+                return
+
+    sys.stderr.write("\n  Confirmado. Compilando y subiendo...\n\n")
 
 
 # Enganche con PlatformIO
