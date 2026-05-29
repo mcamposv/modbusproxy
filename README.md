@@ -1,5 +1,5 @@
 ```markdown
-# 🔋 ESP32 Modbus TCP Proxy & Multiplexer for Huawei EMMA & SUN2000 (v4.0.0)
+# 🔋 ESP32 Modbus TCP Proxy & Multiplexer for Huawei EMMA & SUN2000 (v5.0.0)
 
 Este repositorio contiene el firmware de grado industrial desarrollado para **ESP32** (optimizado para conexión por cable físico mediante la pila Ethernet nativa del chip LAN8720 en placas WT32-ETH01, o mediante su antena WiFi interna). El dispositivo actúa como un **escudo de red, proxy transparente bajo demanda (On-Demand) y multiplexor de canales Modbus TCP**.
 
@@ -213,5 +213,145 @@ Para la carga inicial del firmware o recuperación de emergencia usando un progr
                |     ETH0 PORT     |
                +-------------------+
 > ⚠️ **REGLA DE ORO DE SEGURIDAD ELÉCTRICA:** Jamás se deben conectar simultáneamente la alimentación de 5V de trabajo (Pin 9) y la alimentación de 3.3V del programador serie (Pin 7). Romper esta norma provocará un retorno de corriente que puede dañar de forma permanente el aislamiento del puerto USB de tu ordenador o fundir el regulador del ESP32.
+
+---
+
+## 🧙 Configuración Inicial — Modo Setup
+
+A partir de la versión 5.0.0 el dispositivo incluye un **asistente de configuración inicial** que evita tener que editar `secrets.h` y recompilar para cada instalación nueva.
+
+### ¿Cómo funciona?
+
+El firmware almacena una variable `runSetup` en la memoria no volátil (NVS) del ESP32:
+
+| `runSetup` en NVS | Qué ocurre al arrancar |
+|:-:|---|
+| `true` (o no existe) | Entra en **Modo Setup** |
+| `false` | Arranca en **Modo Proxy** normal |
+
+Cuando la NVS está vacía (dispositivo recién flasheado o flash borrada), `runSetup` no existe y el dispositivo entra en Modo Setup automáticamente.
+
+---
+
+### Qué hace el Modo Setup
+
+Al entrar en Modo Setup el ESP32:
+
+1. Levanta un **punto de acceso WiFi abierto** con el nombre `modbusproxy-5.0.0` (sin contraseña).
+2. Asigna la IP `192.168.1.1` a su propia interfaz.
+3. Cualquier dispositivo que se conecte a esa WiFi y abra un navegador es **redirigido automáticamente** a la página de configuración (portal cautivo — funciona igual que los WiFi de hoteles).
+4. El asistente permite configurar:
+   - Tipo de conexión: WiFi o Ethernet
+   - Escaneo de redes WiFi visibles con indicador de señal
+   - DHCP o IP estática (con IP, máscara, gateway y DNS)
+   - IP y puerto del servidor Modbus (EMMA / inversor)
+5. Al pulsar **Guardar**, los valores se escriben en la NVS, `runSetup` se pone a `false` y el dispositivo **reinicia en modo proxy** normal.
+
+> La pantalla OLED muestra el nombre del AP y la IP `192.168.1.1` mientras el Modo Setup está activo.
+
+---
+
+### Recuperar el Modo Setup (Factory Reset)
+
+Si el dispositivo ya está configurado pero necesitas volver al asistente — porque cambiaste de red, olvidaste la IP, o quieres reconfigurarlo desde cero — tienes tres opciones:
+
+---
+
+#### Opción A — Factory Reset desde la web *(la más fácil)*
+
+Si todavía tienes acceso a la interfaz web del proxy:
+
+1. Abre `http://<IP_del_proxy>/config` en el navegador.
+2. Baja hasta la sección **Zona de Peligro**.
+3. Pulsa **Factory Reset (Entrar en Modo Setup)** y confirma.
+4. El dispositivo reinicia y levanta el AP `modbusproxy-5.0.0`.
+
+---
+
+#### Opción B — Script de flasheo `flash.py` *(con PlatformIO)*
+
+El repositorio incluye el script `flash.py` en la raíz del proyecto. Compila, flashea y opcionalmente borra la NVS para forzar Modo Setup, todo en un solo paso.
+
+**Requisitos:** Python 3 y PlatformIO instalados.
+
+```bash
+python flash.py
+```
+
+El script pregunta interactivamente:
+
+```
+╔══════════════════════════════════════════╗
+║     FLASH — Proxy Modbus (USB)           ║
+╚══════════════════════════════════════════╝
+  Entorno : esp32_usb
+
+¿Forzar modo Setup tras el flash? (s/N):
+```
+
+- **N (por defecto):** flashea el firmware conservando la NVS. El dispositivo arranca con la configuración guardada.
+- **s:** flashea el firmware y borra la partición NVS. El dispositivo entra en Modo Setup al arrancar.
+
+> Para cambiar el entorno de compilación: `python flash.py -e PROD_ota`
+
+---
+
+#### Opción C — Borrado manual con Arduino IDE *(sin PlatformIO)*
+
+Arduino IDE no incluye el script `flash.py`, pero puedes conseguir el mismo resultado en dos pasos:
+
+**Paso 1 — Borrar la flash completa desde Arduino IDE:**
+
+En Arduino IDE 2.x, con la placa ESP32 seleccionada y el puerto conectado:
+
+```
+Herramientas > Erase Flash > All Flash Contents
+```
+
+Esto borra el firmware **y** la NVS. El dispositivo quedará en blanco.
+
+**Paso 2 — Flashear el firmware:**
+
+Abre el proyecto y pulsa **Subir** (Upload) normalmente. Como la NVS está vacía, `runSetup` no existe y el dispositivo entra en Modo Setup.
+
+---
+
+**Alternativa: borrar solo la NVS con esptool** *(sin borrar el firmware)*
+
+Si quieres borrar únicamente la NVS sin tocar el firmware, puedes usar `esptool.py` directamente desde la línea de comandos. Esta herramienta viene incluida con el paquete de placas ESP32 de Arduino IDE.
+
+```bash
+esptool.py --port <PUERTO> erase_region 0x9000 0x5000
+```
+
+Sustituye `<PUERTO>` por el puerto serie de tu ESP32:
+- Windows: `COM3`, `COM4`, etc.
+- Linux / macOS: `/dev/ttyUSB0`, `/dev/cu.usbserial-xxxx`, etc.
+
+La ubicación de `esptool.py` según el sistema operativo:
+
+| SO | Ruta habitual |
+|---|---|
+| Windows | `%LOCALAPPDATA%\Arduino15\packages\esp32\tools\esptool_py\<ver>\esptool.exe` |
+| macOS | `~/Library/Arduino15/packages/esp32/tools/esptool_py/<ver>/esptool.py` |
+| Linux | `~/.arduino15/packages/esp32/tools/esptool_py/<ver>/esptool.py` |
+
+> Si tienes Python instalado también puedes usar: `python -m esptool --port <PUERTO> erase_region 0x9000 0x5000`
+
+Tras ejecutar el comando, el dispositivo reinicia automáticamente y entra en Modo Setup.
+
+---
+
+### Variable `SETUP_NEEDED` para desarrolladores
+
+En `src/proxy_operativo.hpp` existe la constante:
+
+```cpp
+// Cambia a true para que el proximo arranque entre en modo Setup.
+// Solo afecta a dispositivos sin NVS configurada (virgen o borrada).
+const bool SETUP_NEEDED = false;
+```
+
+Si la pones a `true` y borras la NVS antes de flashear (o usas `flash.py` con la opción de forzar Setup), el dispositivo entrará en Modo Setup. Una vez que el usuario completa la configuración, `runSetup` se escribe a `false` en la NVS y el dispositivo arranca normalmente en los siguientes reinicios — aunque `SETUP_NEEDED` siga siendo `true` en el código.
 
 ---

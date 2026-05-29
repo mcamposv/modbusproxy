@@ -36,6 +36,11 @@ struct AppConfig {
 
 AppConfig cfg;
 
+// Cambia a true para que el proximo arranque entre en modo Setup.
+// Solo afecta a dispositivos sin NVS configurada (virgen o borrada).
+// Para forzar Setup en un dispositivo ya configurado usa Factory Reset desde /config.
+const bool SETUP_NEEDED = true;
+
 void loadConfig() {
     prefs.begin("proxycfg", true); // read-only
     cfg.useEthernet  = prefs.getBool  ("useEth",     false);
@@ -67,8 +72,7 @@ void saveConfig() {
     prefs.putString("subnet",     cfg.subnet);
     prefs.putString("dns",        cfg.dns);
     prefs.putString("otaPass",    cfg.otaPassword);
-    prefs.putBool  ("cfgOk",      true);  // marca dispositivo como configurado
-    prefs.putBool  ("runSetup",   false); // limpia flag de factory reset si estaba activo
+    prefs.putBool("runSetup", false);
     prefs.end();
 }
 
@@ -88,7 +92,7 @@ const uint8_t  MODBUS_FIXED_ID = 0;
 const uint16_t MODBUS_TEST_REG = 30000;
 const uint32_t RECONNECT_DELAY = 100;
 
-const String FIRMWARE_VERSION = "5.0.0";
+const String FIRMWARE_VERSION = "5.1.0";
 // ====================================================================
 
 // Máquina de estados extendida
@@ -220,6 +224,8 @@ void handleWebLogCsv();
 void handleWebConfig();
 void handleWebConfigSave();
 void handleFactoryReset();
+void handleReboot();
+void handleWifiScan();
 String buildNavBar(const String &activePage);
 
 // Modo setup: AP WiFi + portal cautivo para configuracion inicial
@@ -301,22 +307,17 @@ void setup() {
     esp_log_level_set("*", ESP_LOG_NONE);
 
     // Comprobar si debemos entrar en modo Setup.
-    // Logica:
-    //   - "cfgOk"=true  → dispositivo ya configurado → modo proxy normal
-    //   - "cfgOk"=false (clave ausente = dispositivo virgen) → modo setup
-    //   - "runSetup"=true → factory reset solicitado → modo setup
-    //   - FORCE_SETUP (define de compilacion) → modo setup incondicionalmente
+    // "runSetup"=true  → entrar en Setup  (default true = dispositivo virgen)
+    // "runSetup"=false → arranque normal
     {
         Preferences _p;
         _p.begin("proxycfg", true);
-        bool isConfigured = _p.getBool("cfgOk",    false); // false = virgen / nunca guardado
-        bool forceNVS     = _p.getBool("runSetup",  false); // true = factory reset
+        bool goSetup = _p.getBool("runSetup", SETUP_NEEDED); // default: virgen → Setup
         _p.end();
-        if (FORCE_SETUP || forceNVS || !isConfigured) {
+        if (goSetup) {
+            loadConfig(); // poblar cfg con NVS/defaults antes de mostrar el setup
             Wire.begin(33, 32);
-            if (!display.begin(DIRECCION_I2C, true)) {
-                // Si el OLED no responde continuamos igualmente
-            }
+            if (!display.begin(DIRECCION_I2C, true)) {}
             runSetupMode(); // nunca retorna
         }
     }
@@ -336,7 +337,8 @@ void setup() {
 
     Wire.begin(33, 32);
     if (!display.begin(DIRECCION_I2C, true)) for (;;);
-    
+    if (cfg.rotateScreen) display.setRotation(2);
+
     display.clearDisplay();
     display.setTextSize(1);
     display.setTextColor(SH110X_WHITE);
@@ -364,6 +366,8 @@ void setup() {
     webServer.on("/config",         HTTP_GET,  handleWebConfig);
     webServer.on("/config/save",    HTTP_POST, handleWebConfigSave);
     webServer.on("/factory-reset",  HTTP_POST, handleFactoryReset);
+    webServer.on("/reboot",         HTTP_POST, handleReboot);
+    webServer.on("/wifi-scan",      HTTP_GET,  handleWifiScan);
     webServer.begin();
 
     backendMutex = xSemaphoreCreateMutex();
@@ -466,6 +470,51 @@ String buildNavBar(const String &activePage) {
 }
 
 // ====================================================================
+// REBOOT: reinicia el ESP32 desde la web
+// ====================================================================
+void handleReboot() {
+    String html = F("<!DOCTYPE html><html lang='es'><head><meta charset='UTF-8'>");
+    html += F("<meta name='viewport' content='width=device-width,initial-scale=1.0'>");
+    html += F("<meta http-equiv='refresh' content='8;url=/'>");
+    html += F("<title>Reiniciando...</title>");
+    html += F("<style>body{background:#121212;color:#fff;font-family:sans-serif;");
+    html += F("text-align:center;padding-top:12%;}h1{color:#17a2b8;}</style>");
+    html += F("</head><body>");
+    html += F("<h1>&#128260; Reiniciando...</h1>");
+    html += F("<p>El dispositivo se esta reiniciando.</p>");
+    html += F("<p style='color:#888;font-size:13px;'>Seras redirigido al Dashboard en 8 segundos.</p>");
+    html += F("</body></html>");
+    webServer.send(200, "text/html", html);
+    delay(1000);
+    ESP.restart();
+}
+
+// ====================================================================
+// WIFI SCAN (modo proxy): devuelve JSON con redes visibles
+// ====================================================================
+void handleWifiScan() {
+    int n = WiFi.scanNetworks(false, false);
+    String json = "[";
+    bool first = true;
+    if (n > 0) {
+        for (int i = 0; i < n; i++) {
+            String ssid = WiFi.SSID(i);
+            if (ssid.length() == 0) continue;
+            if (!first) json += ",";
+            first = false;
+            ssid.replace("\\", "\\\\");
+            ssid.replace("\"", "\\\"");
+            json += "{\"ssid\":\"" + ssid + "\",\"rssi\":" + String(WiFi.RSSI(i));
+            json += ",\"enc\":" + String(WiFi.encryptionType(i) != WIFI_AUTH_OPEN ? 1 : 0) + "}";
+        }
+    }
+    json += "]";
+    WiFi.scanDelete();
+    webServer.sendHeader("Cache-Control", "no-cache");
+    webServer.send(200, "application/json", json);
+}
+
+// ====================================================================
 // FACTORY RESET: activa modo setup en el proximo arranque
 // ====================================================================
 void handleFactoryReset() {
@@ -538,6 +587,20 @@ void handleWebConfig() {
     html += ".btn-save:hover{background:#1e8035;}";
     html += ".warn{background:#3d2f00;border:1px solid #f39c12;color:#ffe082;";
     html += "padding:12px 16px;border-radius:6px;margin-bottom:20px;font-size:14px;}";
+    html += ".btn-scan{padding:8px 16px;background:#17a2b8;color:#fff;border:none;";
+    html += "border-radius:5px;font-size:13px;font-weight:600;cursor:pointer;margin-bottom:8px;}";
+    html += ".btn-scan:disabled{opacity:.6;cursor:wait;}";
+    html += ".btn-scan:hover:not(:disabled){background:#138496;}";
+    html += "#netList{border-radius:5px;overflow:hidden;border:1px solid #2a2a2a;margin-bottom:10px;}";
+    html += "#netList:empty{display:none;}";
+    html += ".net-item{padding:9px 14px;background:#1a1a1a;border-bottom:1px solid #2a2a2a;";
+    html += "cursor:pointer;display:flex;align-items:center;gap:10px;}";
+    html += ".net-item:last-child{border-bottom:none;}";
+    html += ".net-item:hover,.net-item.sel{background:#1e3a5a;}";
+    html += ".net-sig{min-width:52px;letter-spacing:1px;}";
+    html += ".net-ssid{flex:1;font-size:14px;}";
+    html += ".net-dbm{font-size:11px;color:#666;white-space:nowrap;}";
+    html += ".scan-msg{padding:9px 14px;color:#888;font-size:13px;font-style:italic;}";
     html += "</style></head><body>";
     html += buildNavBar("config");
     html += "<div class='wrap'>";
@@ -588,7 +651,13 @@ void handleWebConfig() {
     html += "<p class='section-note'>Solo se usan si la conexion seleccionada es WiFi.</p>";
 
     html += "<div class='form-group'>";
-    html += "<label for='wifiSSID'>SSID (nombre de la red WiFi)</label>";
+    html += "<label>Redes WiFi disponibles</label>";
+    html += "<button type='button' class='btn-scan' id='scanBtn' onclick='doScan()'>Escanear redes WiFi</button>";
+    html += "<div id='netList'></div>";
+    html += "</div>";
+
+    html += "<div class='form-group'>";
+    html += "<label for='wifiSSID'>SSID (selecciona arriba o escribe manualmente)</label>";
     html += "<input type='text' id='wifiSSID' name='wifiSSID' maxlength='63' value='";
     html += htmlEscape(cfg.wifiSSID);
     html += "'></div>";
@@ -654,8 +723,16 @@ void handleWebConfig() {
     html += "<button type='submit' class='btn-save'>&#128190; Guardar y Reiniciar</button>";
     html += "</form>";
 
+    // ---- REBOOT ----
+    html += "<hr style='border:none;border-top:1px solid #333;margin:32px 0 20px;'>";
+    html += "<form method='POST' action='/reboot'>";
+    html += "<button type='submit' style='display:block;width:100%;padding:11px;background:#17a2b8;";
+    html += "color:#fff;border:none;border-radius:6px;font-size:15px;font-weight:700;cursor:pointer;'>";
+    html += "&#128260; Reiniciar dispositivo</button>";
+    html += "</form>";
+
     // ---- ZONA DE PELIGRO: Factory Reset ----
-    html += "<hr style='border:none;border-top:1px solid #333;margin:36px 0 24px;'>";
+    html += "<hr style='border:none;border-top:1px solid #333;margin:24px 0 24px;'>";
     html += "<h3 style='color:#dc3545;'>&#9888; Zona de Peligro</h3>";
     html += "<div class='warn'>El <strong>Factory Reset</strong> hace que el proximo arranque entre en ";
     html += "<strong>Modo Setup</strong>. El dispositivo levantara un AP WiFi abierto llamado ";
@@ -669,6 +746,42 @@ void handleWebConfig() {
     html += "color:#fff;border:none;border-radius:6px;font-size:15px;font-weight:700;cursor:pointer;'>";
     html += "&#128260; Factory Reset (Entrar en Modo Setup)</button>";
     html += "</form>";
+
+    // ---- JavaScript: scan WiFi ----
+    html += "<script>";
+    html += "function sigBars(r){";
+    html += "var b=r>=-50?4:r>=-65?3:r>=-75?2:1;";
+    html += "var c=b>=3?'#28a745':b==2?'#f39c12':'#dc3545';";
+    html += "var s='';for(var i=0;i<4;i++)s+='<span style=\"color:'+(i<b?c:'#333')+'\">&#9646;</span>';";
+    html += "return s;}";
+    html += "function doScan(){";
+    html += "var btn=document.getElementById('scanBtn');";
+    html += "var lst=document.getElementById('netList');";
+    html += "btn.disabled=true;btn.textContent='Escaneando...';";
+    html += "lst.innerHTML='<div class=\"scan-msg\">Buscando redes...</div>';";
+    html += "fetch('/wifi-scan')";
+    html += ".then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.json();})";
+    html += ".then(function(nets){";
+    html += "lst.innerHTML='';";
+    html += "if(!nets||!nets.length){lst.innerHTML='<div class=\"scan-msg\">Sin redes encontradas.</div>';return;}";
+    html += "nets.forEach(function(n){";
+    html += "var d=document.createElement('div');d.className='net-item';";
+    html += "var lock=n.enc?'&#128274;':'&#128275;';";
+    html += "d.innerHTML='<span class=\"net-sig\">'+sigBars(n.rssi)+'</span>'";
+    html += "+'<span class=\"net-ssid\">'+n.ssid+'</span>'";
+    html += "+'<span>'+lock+'</span>'";
+    html += "+'<span class=\"net-dbm\">'+n.rssi+'&nbsp;dBm</span>';";
+    html += "(function(s){d.onclick=function(){";
+    html += "document.querySelectorAll('.net-item').forEach(function(x){x.classList.remove('sel');});";
+    html += "d.classList.add('sel');";
+    html += "document.getElementById('wifiSSID').value=s;";
+    html += "document.getElementById('wifiPass').focus();";
+    html += "};})(n.ssid);";
+    html += "lst.appendChild(d);});})";
+    html += ".catch(function(e){lst.innerHTML='<div class=\"scan-msg\">Error: '+e.message+'</div>';})";
+    html += ".finally(function(){btn.disabled=false;btn.textContent='Escanear redes WiFi';});";
+    html += "}";
+    html += "</script>";
 
     html += "</div></body></html>";
 

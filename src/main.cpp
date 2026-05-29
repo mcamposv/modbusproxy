@@ -7,15 +7,6 @@
 #define MODO_TEST_HARDWARE false
 
 // ====================================================================
-// FORZAR MODO SETUP EN EL SIGUIENTE ARRANQUE (independiente de NVS)
-// Cambia esto a 'true' para entrar siempre en modo Setup al arrancar.
-// El modo Setup normal se activa via Factory Reset desde la web /config
-// o automaticamente en el primer arranque (dispositivo sin configurar).
-// ====================================================================
-
-#define FORCE_SETUP false
-
-// ====================================================================
 // MOTOR DE INYECCIÓN DE CÓDIGO (Directivas de Preprocesador)
 // No tocar a menos que cambies el nombre de los archivos
 // ====================================================================
