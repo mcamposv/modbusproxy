@@ -4,9 +4,9 @@
 #include <Adafruit_SH110X.h>
 #include <WiFi.h>
 #include <ETH.h>
-#include <ESP32Ping.h> 
-#include <WebServer.h> 
-#include <ArduinoOTA.h> 
+#include <ESP32Ping.h>
+#include <WebServer.h>
+#include <ArduinoOTA.h>
 #include <Preferences.h>
 #include "secrets.h"   // Valores default del primer arranque — EXCLUIDO DE GIT
 #include <esp_wifi.h>
@@ -67,6 +67,8 @@ void saveConfig() {
     prefs.putString("subnet",     cfg.subnet);
     prefs.putString("dns",        cfg.dns);
     prefs.putString("otaPass",    cfg.otaPassword);
+    prefs.putBool  ("cfgOk",      true);  // marca dispositivo como configurado
+    prefs.putBool  ("runSetup",   false); // limpia flag de factory reset si estaba activo
     prefs.end();
 }
 
@@ -86,7 +88,7 @@ const uint8_t  MODBUS_FIXED_ID = 0;
 const uint16_t MODBUS_TEST_REG = 30000;
 const uint32_t RECONNECT_DELAY = 100;
 
-const String FIRMWARE_VERSION = "4.5.0";
+const String FIRMWARE_VERSION = "5.0.0";
 // ====================================================================
 
 // Máquina de estados extendida
@@ -217,7 +219,12 @@ void handleWebLog();
 void handleWebLogCsv();
 void handleWebConfig();
 void handleWebConfigSave();
+void handleFactoryReset();
 String buildNavBar(const String &activePage);
+
+// Modo setup: AP WiFi + portal cautivo para configuracion inicial
+// Requiere que display ya este declarado (Adafruit_SH1106G) y FIRMWARE_VERSION definido
+#include "setup_mode.hpp"
 
 void setupOTA() {
     ArduinoOTA.setPort(3232);
@@ -293,6 +300,27 @@ void setup() {
     Serial.begin(115200);
     esp_log_level_set("*", ESP_LOG_NONE);
 
+    // Comprobar si debemos entrar en modo Setup.
+    // Logica:
+    //   - "cfgOk"=true  → dispositivo ya configurado → modo proxy normal
+    //   - "cfgOk"=false (clave ausente = dispositivo virgen) → modo setup
+    //   - "runSetup"=true → factory reset solicitado → modo setup
+    //   - FORCE_SETUP (define de compilacion) → modo setup incondicionalmente
+    {
+        Preferences _p;
+        _p.begin("proxycfg", true);
+        bool isConfigured = _p.getBool("cfgOk",    false); // false = virgen / nunca guardado
+        bool forceNVS     = _p.getBool("runSetup",  false); // true = factory reset
+        _p.end();
+        if (FORCE_SETUP || forceNVS || !isConfigured) {
+            Wire.begin(33, 32);
+            if (!display.begin(DIRECCION_I2C, true)) {
+                // Si el OLED no responde continuamos igualmente
+            }
+            runSetupMode(); // nunca retorna
+        }
+    }
+
     // Cargar configuracion persistente desde NVS.
     // Si es el primer arranque, el struct ya tiene los defaults del firmware.
     loadConfig();
@@ -328,13 +356,14 @@ void setup() {
     delay(500); 
     setupOTA(); 
 
-    webServer.on("/",            handleWebRoot);
-    webServer.on("/apagar",      handleWebShutdown);
-    webServer.on("/api/status",  handleApiStatus);
-    webServer.on("/log",         handleWebLog);
-    webServer.on("/log.csv",     handleWebLogCsv);
-    webServer.on("/config",      HTTP_GET,  handleWebConfig);
-    webServer.on("/config/save", HTTP_POST, handleWebConfigSave);
+    webServer.on("/",               handleWebRoot);
+    webServer.on("/apagar",         handleWebShutdown);
+    webServer.on("/api/status",     handleApiStatus);
+    webServer.on("/log",            handleWebLog);
+    webServer.on("/log.csv",        handleWebLogCsv);
+    webServer.on("/config",         HTTP_GET,  handleWebConfig);
+    webServer.on("/config/save",    HTTP_POST, handleWebConfigSave);
+    webServer.on("/factory-reset",  HTTP_POST, handleFactoryReset);
     webServer.begin();
 
     backendMutex = xSemaphoreCreateMutex();
@@ -434,6 +463,35 @@ String buildNavBar(const String &activePage) {
     nav += navLink("/config", "Configuracion", "config");
     nav += "</nav>";
     return nav;
+}
+
+// ====================================================================
+// FACTORY RESET: activa modo setup en el proximo arranque
+// ====================================================================
+void handleFactoryReset() {
+    Preferences p;
+    p.begin("proxycfg", false);
+    p.putBool("runSetup", true);
+    p.end();
+
+    Serial.println("[CFG] Factory Reset solicitado. Reiniciando en modo Setup...");
+
+    String html = "<!DOCTYPE html><html lang='es'><head><meta charset='UTF-8'>";
+    html += "<meta name='viewport' content='width=device-width,initial-scale=1.0'>";
+    html += "<title>Factory Reset - Proxy Modbus</title>";
+    html += "<style>body{background:#121212;color:#fff;font-family:sans-serif;";
+    html += "text-align:center;padding-top:12%;}h1{color:#f39c12;}</style>";
+    html += "</head><body>";
+    html += "<h1>&#128260; Entrando en Modo Setup</h1>";
+    html += "<p>El dispositivo se esta reiniciando...</p>";
+    html += "<p style='color:#888;font-size:13px;'>Conectate al punto de acceso WiFi <strong>modbusproxy-";
+    html += FIRMWARE_VERSION;
+    html += "</strong> para configurar el dispositivo.</p>";
+    html += "</body></html>";
+
+    webServer.send(200, "text/html", html);
+    delay(1500);
+    ESP.restart();
 }
 
 // ====================================================================
@@ -595,6 +653,23 @@ void handleWebConfig() {
 
     html += "<button type='submit' class='btn-save'>&#128190; Guardar y Reiniciar</button>";
     html += "</form>";
+
+    // ---- ZONA DE PELIGRO: Factory Reset ----
+    html += "<hr style='border:none;border-top:1px solid #333;margin:36px 0 24px;'>";
+    html += "<h3 style='color:#dc3545;'>&#9888; Zona de Peligro</h3>";
+    html += "<div class='warn'>El <strong>Factory Reset</strong> hace que el proximo arranque entre en ";
+    html += "<strong>Modo Setup</strong>. El dispositivo levantara un AP WiFi abierto llamado ";
+    html += "<strong>modbusproxy-";
+    html += FIRMWARE_VERSION;
+    html += "</strong> desde el que podras reconfigurarlo. ";
+    html += "La configuracion actual se conserva en memoria hasta que guardes en el Setup.</div>";
+    html += "<form method='POST' action='/factory-reset' ";
+    html += "onsubmit='return confirm(\"\\u00BFEntrar en Modo Setup? El dispositivo se reiniciara y levantara un AP WiFi para reconfigurarse.\")'>";
+    html += "<button type='submit' style='display:block;width:100%;padding:12px;background:#dc3545;";
+    html += "color:#fff;border:none;border-radius:6px;font-size:15px;font-weight:700;cursor:pointer;'>";
+    html += "&#128260; Factory Reset (Entrar en Modo Setup)</button>";
+    html += "</form>";
+
     html += "</div></body></html>";
 
     webServer.send(200, "text/html", html);
