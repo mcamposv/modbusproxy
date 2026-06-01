@@ -16,3 +16,5 @@ Thumbs.db
 *.o
 *.elf
 *.bin
+__pycache__/
+*.pyc
