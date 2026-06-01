@@ -4,6 +4,8 @@ Este repositorio contiene el firmware de grado industrial desarrollado para **ES
 
 Su propósito fundamental es solucionar de forma definitiva el problema crítico de bloqueo y baneo por DDoS en los ecosistemas residenciales e industriales de **Huawei (SmartGuard / EMMA / Inversores SUN2000)**. Estos equipos cuentan con un firmware estricto que solo tolera **un único cliente TCP concurrente en el puerto 502**, tirando la conexión o aplicando listas negras si Home Assistant, cargadores de vehículos eléctricos (ej: V2C) o sistemas de analítica locales intentan leer métricas de forma simultánea.
 
+> 🌐 **English documentation available:** [README.en.md](README.en.md)
+
 ---
 
 ## 💡 Hardware mínimo — funciona sin pantalla ni botones
