@@ -6,6 +6,24 @@ Su propósito fundamental es solucionar de forma definitiva el problema crítico
 
 ---
 
+## 💡 Hardware mínimo — funciona sin pantalla ni botones
+
+**Solo necesitas un ESP32 con WiFi** para poner en marcha el proxy. La pantalla OLED y los botones físicos son opcionales: añaden comodidad y diagnóstico local, pero el firmware es completamente funcional sin ellos.
+
+| Componente | ¿Necesario? | Notas |
+|---|:---:|---|
+| ESP32 (cualquier variante con WiFi) | ✅ Sí | `esp32dev`, NodeMCU-32S, Wemos D1 Mini32, etc. |
+| Conexión WiFi o Ethernet a tu red local | ✅ Sí | WiFi integrado en cualquier ESP32 |
+| Pantalla OLED SH1106 (I2C) | ❌ Opcional | Menú de diagnóstico local |
+| Botones físicos (OK, +, −, BACK) | ❌ Opcional | Solo necesarios si usas la pantalla |
+| Placa WT32-ETH01 (Ethernet nativo) | ❌ Opcional | Recomendada para instalación permanente |
+
+Sin pantalla ni botones, toda la gestión se realiza desde el navegador web (`http://<IP_ESP32>/`) y la API REST (`/api/status`). El Modo Setup (configuración inicial) también funciona en modo headless: el ESP32 levanta un punto de acceso WiFi al que te conectas desde el móvil o el ordenador.
+
+> **Para empezar rápido:** flashea el firmware en cualquier ESP32 con WiFi, configura `secrets.h` con tu SSID y la IP de tu EMMA, y conéctate a la web del proxy. No hace falta soldar nada.
+
+---
+
 ## 🗺️ Arquitectura de Red e Intermediación
 
 El ESP32 se sitúa estratégicamente en la red local como un escudo y distribuidor de tráfico transparente ("On-Demand Proxy").
@@ -22,7 +40,7 @@ El ESP32 se sitúa estratégicamente en la red local como un escudo y distribuid
 +--------------------+     |       [Pantalla OLED]          +-------------------------+
                            |       Métricas y Tests
 +--------------------+     |
-| Pantalla OLED Local| ----+
+| Pantalla OLED Local| ----+   (opcional)
 |  (Menú Diagnóstico)|
 +--------------------+
 
@@ -434,5 +452,28 @@ const bool SETUP_NEEDED = false;
 ```
 
 Si la pones a `true` y borras la NVS antes de flashear (o usas `flash.py` con la opción de forzar Setup), el dispositivo entrará en Modo Setup. Una vez que el usuario completa la configuración, `runSetup` se escribe a `false` en la NVS y el dispositivo arranca normalmente en los siguientes reinicios — aunque `SETUP_NEEDED` siga siendo `true` en el código.
+
+---
+
+## ⚠️ Aviso legal y responsabilidad
+
+Este proyecto es software libre desarrollado y probado en un entorno doméstico particular con equipos Huawei EMMA y SUN2000 específicos. Se publica con la esperanza de que sea útil, pero **sin ninguna garantía de ningún tipo**.
+
+- El autor no se hace responsable de daños en tus equipos, pérdida de datos, interrupciones del suministro eléctrico, baneos de dispositivos Huawei, ni de ningún otro perjuicio derivado del uso de este firmware.
+- **Úsalo bajo tu propia responsabilidad.** Asegúrate de entender qué hace el código antes de desplegarlo en un entorno de producción o en instalaciones fotovoltaicas reales.
+- Este software no está afiliado ni respaldado por Huawei Technologies Co., Ltd.
+- Los nombres Huawei, EMMA, SUN2000 y SmartGuard son marcas registradas de sus respectivos propietarios.
+
+---
+
+## 📄 Licencia
+
+Copyright (C) 2024 mcamposv
+
+Este programa es software libre: puedes redistribuirlo y/o modificarlo bajo los términos de la **GNU General Public License** publicada por la Free Software Foundation, en su versión 3 o (a tu elección) cualquier versión posterior.
+
+Este programa se distribuye con la esperanza de que sea útil, pero **SIN NINGUNA GARANTÍA**; ni siquiera la garantía implícita de COMERCIABILIDAD o IDONEIDAD PARA UN PROPÓSITO PARTICULAR. Consulta la GNU General Public License para más detalles.
+
+Deberías haber recibido una copia de la GNU General Public License junto con este programa. Si no, consulta <https://www.gnu.org/licenses/>.
 
 ---
