@@ -27,10 +27,10 @@ struct AppConfig {
     char   wifiPass[64]     = DEFAULT_WIFI_PASSWORD;   // <- secrets.h
     char   modbusIP[16]     = DEFAULT_MODBUS_IP;       // <- secrets.h
     uint16_t modbusPort     = DEFAULT_MODBUS_PORT;     // <- secrets.h
-    char   localIP[16]      = "192.168.1.103";
-    char   gateway[16]      = "192.168.1.1";
-    char   subnet[16]       = "255.255.255.0";
-    char   dns[16]          = "192.168.1.1";
+    char   localIP[16]      = DEFAULT_LOCAL_IP;    // <- secrets.h
+    char   gateway[16]      = DEFAULT_GATEWAY;     // <- secrets.h
+    char   subnet[16]       = DEFAULT_SUBNET;      // <- secrets.h
+    char   dns[16]          = DEFAULT_DNS;         // <- secrets.h
     char   otaPassword[32]  = DEFAULT_OTA_PASSWORD;    // <- secrets.h
 };
 

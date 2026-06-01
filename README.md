@@ -49,6 +49,10 @@ Edita `src/secrets.h`:
 #define DEFAULT_WIFI_PASSWORD  "TU_PASSWORD_WIFI"
 #define DEFAULT_MODBUS_IP      "192.168.x.x"   // IP de tu EMMA o inversor
 #define DEFAULT_MODBUS_PORT    502
+#define DEFAULT_LOCAL_IP       "192.168.x.x"   // IP que tendrá el proxy en tu red
+#define DEFAULT_GATEWAY        "192.168.x.1"   // Puerta de enlace de tu router
+#define DEFAULT_SUBNET         "255.255.255.0"
+#define DEFAULT_DNS            "192.168.x.1"
 #define DEFAULT_OTA_PASSWORD   "tu_password_ota"
 ```
 

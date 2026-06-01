@@ -171,10 +171,15 @@ def ask_for_confirmation(source, target, env):
     use_eth  = use_eth_raw  == "true"
     use_dhcp = use_dhcp_raw == "true"
 
-    # IP estatica del proxy (literal en el struct)
-    local_ip = extract_struct_field_str(proxy_content, "localIP")
-    gw_ip    = extract_struct_field_str(proxy_content, "gateway")
-    sn_ip    = extract_struct_field_str(proxy_content, "subnet")
+    # IP estatica del proxy — puede ser literal o macro DEFAULT_* de secrets.h
+    local_ip_raw = extract_struct_field_str(proxy_content, "localIP")
+    local_ip = extract_define(secrets_content, local_ip_raw) if local_ip_raw.startswith("DEFAULT_") else local_ip_raw
+
+    gw_ip_raw = extract_struct_field_str(proxy_content, "gateway")
+    gw_ip = extract_define(secrets_content, gw_ip_raw) if gw_ip_raw.startswith("DEFAULT_") else gw_ip_raw
+
+    sn_ip_raw = extract_struct_field_str(proxy_content, "subnet")
+    sn_ip = extract_define(secrets_content, sn_ip_raw) if sn_ip_raw.startswith("DEFAULT_") else sn_ip_raw
 
     # Puerto Modbus: puede ser la macro DEFAULT_MODBUS_PORT o un numero
     modbus_port_raw = extract_struct_field_uint(proxy_content, "modbusPort")
