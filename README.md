@@ -1,4 +1,3 @@
-```markdown
 # 🔋 ESP32 Modbus TCP Proxy & Multiplexer for Huawei EMMA & SUN2000 (v5.0.0)
 
 Este repositorio contiene el firmware de grado industrial desarrollado para **ESP32** (optimizado para conexión por cable físico mediante la pila Ethernet nativa del chip LAN8720 en placas WT32-ETH01, o mediante su antena WiFi interna). El dispositivo actúa como un **escudo de red, proxy transparente bajo demanda (On-Demand) y multiplexor de canales Modbus TCP**.
@@ -28,6 +27,84 @@ El ESP32 se sitúa estratégicamente en la red local como un escudo y distribuid
 +--------------------+
 
 ```
+
+---
+
+## 🔧 Configuración local (antes de compilar)
+
+Este proyecto usa **tres archivos locales gitignoreados** para mantener tus credenciales e IPs fuera del repositorio. Cada uno tiene un `.template` de ejemplo que debes copiar y rellenar con tus valores reales.
+
+### 1. `src/secrets.h` — Credenciales del firmware
+
+Necesario para compilar. Define los valores por defecto que se cargan en el primer arranque del ESP32 (antes de configurar desde la web).
+
+```bash
+cp src/secrets.h.template src/secrets.h
+```
+
+Edita `src/secrets.h`:
+
+```cpp
+#define DEFAULT_WIFI_SSID      "TU_SSID_WIFI"
+#define DEFAULT_WIFI_PASSWORD  "TU_PASSWORD_WIFI"
+#define DEFAULT_MODBUS_IP      "192.168.x.x"   // IP de tu EMMA o inversor
+#define DEFAULT_MODBUS_PORT    502
+#define DEFAULT_OTA_PASSWORD   "tu_password_ota"
+```
+
+> Una vez que el dispositivo arranca y guarda la configuración desde la web, estos defaults dejan de tener efecto. Solo son necesarios para el primer flash.
+
+---
+
+### 2. `secrets.ini` — Contraseña OTA e IPs de upload (PlatformIO)
+
+Necesario para subir firmware por OTA con los perfiles `PROD_ota` y `TEST_ota`.
+
+```bash
+cp secrets.ini.template secrets.ini
+```
+
+Edita `secrets.ini`:
+
+```ini
+[secrets]
+ota_password = tu_password_ota   ; debe coincidir con DEFAULT_OTA_PASSWORD
+prod_ip      = 192.168.x.x       ; IP del ESP32 en producción
+test_ip      = 192.168.x.x       ; IP del ESP32 de pruebas
+```
+
+---
+
+### 3. `scripts/local_config.py` — IPs para los scripts de diagnóstico
+
+Opcional pero recomendado. Sin este archivo los scripts requieren el argumento `--host` en cada ejecución.
+
+```bash
+cp scripts/local_config.py.template scripts/local_config.py
+```
+
+Edita `scripts/local_config.py`:
+
+```python
+DEFAULT_HOST = "192.168.x.x"   # IP por defecto para escaner_huawei y test_emma
+
+SERVIDORES = {
+    "emulador":   "192.168.x.x",
+    "proxy_test": "192.168.x.x",
+    "produccion": "192.168.x.x",
+    "emmareal":   "192.168.x.x",
+}
+```
+
+---
+
+### Resumen de archivos locales
+
+| Archivo | Copia desde | Afecta a |
+|---|---|---|
+| `src/secrets.h` | `src/secrets.h.template` | Compilación del firmware |
+| `secrets.ini` | `secrets.ini.template` | Upload OTA con PlatformIO |
+| `scripts/local_config.py` | `scripts/local_config.py.template` | Scripts de diagnóstico Python |
 
 ---
 

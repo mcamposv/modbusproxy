@@ -5,9 +5,10 @@
 3d_design/*.gcode
 repomix-output.xml
 
-# ARCHIVO SECRETO CON CONTRASEÑAS (¡NUNCA SUBIR A GITHUB!)
+# ARCHIVOS SECRETOS CON CONTRASEÑAS O IPS REALES (¡NUNCA SUBIR A GITHUB!)
 src/secrets.h
 secrets.ini
+scripts/local_config.py
 
 # Archivos temporales de sistema o compilación local
 .DS_Store

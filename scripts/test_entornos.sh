@@ -3,18 +3,22 @@ echo "=================================================="
 echo "🚀 LANZANDO DIAGNÓSTICO MODBUS EN PARALELO"
 echo "=================================================="
 
-for octeto in 211 212 213; do
-    case $octeto in
-        211) desc="PROXI OK (Producción Real)" ;;
-        212) desc="EMMA EMULADA (Tu laboratorio)" ;;
-        213) desc="PROXY BAJO PRUEBAS (El que se cuelga)" ;;
-    esac
+# Ajusta estas IPs a las de tu entorno
+IPS=(
+    "192.168.1.101:PROXI OK (Producción Real)"
+    "192.168.1.102:EMMA EMULADA (Tu laboratorio)"
+    "192.168.1.103:PROXY BAJO PRUEBAS (El que se cuelga)"
+)
+
+for entry in "${IPS[@]}"; do
+    ip="${entry%%:*}"
+    desc="${entry#*:}"
 
     echo "--------------------------------------------------"
-    echo "📡 PROBANDO IP: 192.168.1.$octeto -> $desc"
+    echo "📡 PROBANDO IP: $ip -> $desc"
     echo "--------------------------------------------------"
-    
-    mbpoll -m tcp -t 3 -a 0 -r 30000 -c 15 -1 192.168.1.$octeto
+
+    mbpoll -m tcp -t 3 -a 0 -r 30000 -c 15 -1 "$ip"
     
     echo "" # Salto de línea para separar lecturas
 done

@@ -1,0 +1,25 @@
+# =============================================================
+# scripts/local_config.py  — archivo LOCAL, NO subir a git
+# =============================================================
+# INSTRUCCIONES:
+#   1. Copia este fichero y renómbralo a: local_config.py
+#      (en la misma carpeta scripts/)
+#   2. Rellena las IPs reales de tu entorno.
+#   3. NO subas local_config.py a git (ya está en .gitignore).
+#
+# USO:
+#   Con este fichero presente, los scripts funcionan sin argumentos.
+#   Sin él, debes pasar --host explícitamente, p.ej:
+#     python escaner_huawei.py --host 192.168.1.101
+# =============================================================
+
+# IP por defecto para scripts de host único (escaner_huawei, test_emma_gather_data)
+DEFAULT_HOST = "192.168.1.101"
+
+# Mapa completo de entornos para escaner_dinamico.py
+SERVIDORES = {
+    "emulador":   "192.168.1.102",
+    "proxy_test": "192.168.1.103",
+    "produccion": "192.168.1.101",
+    "emmareal":   "192.168.1.100",
+}

@@ -7,11 +7,17 @@ import time
 # 🗺️ MAPA DE SERVIDORES
 # ==========================================
 SERVIDORES = {
-    "emulador":   "192.168.1.102", 
-    "proxy_test": "192.168.1.103", 
-    "produccion": "192.168.1.101", 
-    "emmareal":   "192.168.1.100"  
+    "emulador":   "192.168.1.102",
+    "proxy_test": "192.168.1.103",
+    "produccion": "192.168.1.101",
+    "emmareal":   "192.168.1.100",
 }
+
+try:
+    from local_config import SERVIDORES as _local_servidores
+    SERVIDORES.update(_local_servidores)
+except ImportError:
+    pass
 
 IDS_A_ESCANEAR = [0, 1, 2, 3, 6, 16, 100]
 

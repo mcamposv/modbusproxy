@@ -1,10 +1,21 @@
 import socket
 import threading
 import time
+import argparse
 
-#IP_EMMA = "192.168.1.100"
-IP_EMMA = "192.168.1.101"
-PUERTO = 502
+try:
+    from local_config import DEFAULT_HOST as _default_host
+except ImportError:
+    _default_host = None
+
+parser = argparse.ArgumentParser(description="Test de estrés Modbus TCP para EMMA/inversor Huawei")
+parser.add_argument("--host", default=_default_host, required=_default_host is None,
+                    help="IP del proxy o EMMA (ej: 192.168.1.100)")
+parser.add_argument("--port", type=int, default=502, help="Puerto Modbus (default: 502)")
+args = parser.parse_args()
+
+IP_EMMA = args.host
+PUERTO = args.port
 
 # Trama Modbus TCP real en Hexadecimal (Pidiendo leer 1 registro)
 PAYLOAD_MODBUS = b'\x00\x01\x00\x00\x00\x06\x01\x03\x7d\x00\x00\x01'

@@ -1,10 +1,21 @@
 import socket
 import time
+import argparse
+
+try:
+    from local_config import DEFAULT_HOST as _default_host
+except ImportError:
+    _default_host = None
 
 # --- CONFIGURACIÓN ---
-#IP_PROXY = "192.168.1.100" # EMMA Directa
-IP_PROXY = "192.168.1.101" # Asegúrate de que es la IP de tu ESP32
-PUERTO = 502
+parser = argparse.ArgumentParser(description="Escáner forense Modbus TCP para Huawei EMMA/SUN2000")
+parser.add_argument("--host", default=_default_host, required=_default_host is None,
+                    help="IP del proxy o EMMA (ej: 192.168.1.100)")
+parser.add_argument("--port", type=int, default=502, help="Puerto Modbus (default: 502)")
+args = parser.parse_args()
+
+IP_PROXY = args.host
+PUERTO = args.port
 
 def leer_registro_modbus(slave_id, registro, cantidad):
     # Construcción dinámica de la trama Modbus TCP
