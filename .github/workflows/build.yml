@@ -1,0 +1,44 @@
+name: Build firmware
+
+on:
+  push:
+    branches: ["main", "feature/**"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  build:
+    name: Compile ESP32 firmware
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache PlatformIO packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: pio-${{ hashFiles('platformio.ini') }}
+          restore-keys: pio-
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install PlatformIO
+        run: pip install platformio
+
+      - name: Generate secrets.h from template
+        run: cp src/secrets.h.template src/secrets.h
+
+      - name: Generate secrets.ini from template
+        run: cp secrets.ini.template secrets.ini
+
+      - name: Build
+        run: pio run -e esp32_usb
+
+      - name: Report flash and RAM usage
+        if: success()
+        run: |
+          pio run -e esp32_usb 2>&1 | grep -E "RAM:|Flash:" || true
