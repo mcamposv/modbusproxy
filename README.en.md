@@ -1,4 +1,4 @@
-# 🔋 ESP32 Modbus TCP Proxy & Multiplexer for Huawei EMMA & SUN2000 (v5.0.0)
+# 🔋 ESP32 Modbus TCP Proxy & Multiplexer for Huawei EMMA & SUN2000 (v6.0-0)
 
 This repository contains industrial-grade firmware developed for **ESP32** (optimized for wired connection via the native Ethernet stack of the LAN8720 chip on WT32-ETH01 boards, or via its internal WiFi antenna). The device acts as a **network shield, transparent on-demand proxy, and Modbus TCP channel multiplexer**.
 
@@ -77,6 +77,25 @@ Edit `src/secrets.h`:
 
 ---
 
+### Recommended deployment workflow
+
+Always verify new firmware in the test environment before touching production:
+
+```bash
+# 1. Point secrets.h to the test environment (emulator + IP .213) and upload
+pio run -e TEST_ota -t upload
+
+# 2. Verify the test proxy boots and connects to the emulator
+curl http://192.168.254.213/api/status
+
+# 3. Only if everything looks good: point secrets.h to production (real EMMA + IP .211) and upload
+pio run -e PROD_ota -t upload
+```
+
+> **Rule:** never update production without first testing the same firmware version in the test environment.
+
+---
+
 ### 2. `secrets.ini` — OTA password and upload IPs (PlatformIO)
 
 Required to upload firmware via OTA using the `PROD_ota` and `TEST_ota` profiles.
@@ -131,7 +150,14 @@ SERVIDORES = {
 
 ## 🚀 Version History and Changelog
 
-### 🟢 Version 4.0.0 (Current)
+### 🟢 Version 6.0-0 (Current)
+
+* **Multilingual web interface (i18n):** The proxy's web interface now supports multiple languages dynamically. The user can select the language from the Settings page without needing to recompile the firmware. The chosen language is saved to the ESP32's NVS and persists across reboots.
+* **Included languages:** Spanish (default), English, and German. All three languages cover 100% of the interface texts: setup portal, dashboard, Modbus log, settings page, shutdown page, and reboot page.
+* **C++ struct-based translation architecture:** All strings are stored in flash (`.rodata`) inside `const LangStrings` structs — zero RAM overhead. The active selector is a global pointer `L` set at boot via `i18nInit(cfg.lang)`.
+* **Community-extensible:** Adding a new language means creating a single `.hpp` file under `src/i18n/` following the `strings.hpp` template, including it in `i18n.hpp`, and adding the corresponding case in `i18nInit()`. No web handler code needs to be touched.
+
+### 🟡 Version 4.0.0
 
 * **Permanent Wireless Updates (OTA):** Inclusion of the `ArduinoOTA` stack on network port `3232`. Allows flashing new firmware versions remotely over Ethernet or WiFi. Features a dedicated loading screen on the local OLED showing a real-time progress bar (`UPDATING (OTA)`) and a final success confirmation (`SUCCESS!!`).
 * **Hardened Security (Anti-Git):** Dual wireless authentication system protected against leaks in public repositories. The password travels encrypted via local injection in PlatformIO, combining a `secrets.ini` file (hidden in `.gitignore`) with `secrets.h` preprocessor directives.
@@ -161,7 +187,7 @@ The complete behavior of the board and network stack is managed via parameteriza
 * `MODBUS_FIXED_ID` (`const uint8_t`): Unit ID used for the boot test and initial priming (default `0`, corresponding to the EMMA).
 * `MODBUS_TEST_REG` (`const uint16_t`): Modbus register address queried during the boot liveness test (`30000`, Model Name ASCII).
 * `RECONNECT_DELAY` (`const uint32_t`): Wait time in milliseconds (`5000` ms) the proxy applies before retrying a connection to Huawei's port 502 if the socket breaks, preventing bans from burst infinite retries (Anti-DDoS).
-* `FIRMWARE_VERSION` (`const String`): Stores the semantic version of the active program, rendered centered in the local menu.
+* `FIRMWARE_VERSION` (`const String`): Stores the semantic version of the active program, rendered centered in the local menu. Also used as the suffix of the WiFi AP name in Setup Mode (`modbusproxy-<version>`).
 
 ---
 
@@ -314,7 +340,7 @@ For initial firmware upload or emergency recovery using an external cable progra
 
 ## 🧙 Initial Configuration — Setup Mode
 
-From version 5.0.0, the device includes an **initial configuration wizard** that avoids having to edit `secrets.h` and recompile for each new installation.
+From version 5.0.0, the device includes an **initial configuration wizard** that avoids having to edit `secrets.h` and recompile for each new installation. From version 6.0-0, the setup portal is also available in all three supported languages.
 
 ### How it works
 
@@ -333,7 +359,7 @@ When NVS is empty (freshly flashed device or erased flash), `runSetup` does not 
 
 When entering Setup Mode, the ESP32:
 
-1. Creates an **open WiFi access point** named `modbusproxy-5.0.0` (no password).
+1. Creates an **open WiFi access point** named `modbusproxy-6.0-0` (no password).
 2. Assigns IP `192.168.1.1` to its own interface.
 3. Any device connecting to that WiFi and opening a browser is **automatically redirected** to the configuration page (captive portal — works just like hotel WiFi).
 4. The wizard lets you configure:
@@ -360,7 +386,7 @@ If you still have access to the proxy's web interface:
 1. Open `http://<proxy_IP>/config` in your browser.
 2. Scroll down to the **Danger Zone** section.
 3. Press **Factory Reset (Enter Setup Mode)** and confirm.
-4. The device restarts and brings up the `modbusproxy-5.0.0` AP.
+4. The device restarts and brings up the `modbusproxy-6.0-0` AP.
 
 ---
 
@@ -449,6 +475,44 @@ const bool SETUP_NEEDED = false;
 ```
 
 If set to `true` and the NVS is erased before flashing (or using `flash.py` with the force-Setup option), the device will enter Setup Mode. Once the user completes configuration, `runSetup` is written to `false` in NVS and the device boots normally on subsequent restarts — even if `SETUP_NEEDED` remains `true` in the code.
+
+---
+
+## 🌍 Multilingual Support (i18n)
+
+From version 6.0-0, the proxy's web interface is fully multilingual. The language is selected from the device's Settings page (`/config`) and saved persistently to the ESP32's NVS.
+
+### Available languages
+
+| Code | Language | File |
+|---|---|---|
+| `es` | Español (default) | `src/i18n/es.hpp` |
+| `en` | English | `src/i18n/en.hpp` |
+| `de` | Deutsch | `src/i18n/de.hpp` |
+
+### Technical architecture
+
+All i18n logic lives in `src/i18n/`:
+
+| File | Purpose |
+|---|---|
+| `strings.hpp` | Defines the `LangStrings` struct with every field that each language file must fill in |
+| `es.hpp` / `en.hpp` / `de.hpp` | One `static const LangStrings LANG_XX` instance per language, stored in flash |
+| `i18n.hpp` | Includes all three languages, defines the active pointer `L` and the `i18nInit(lang)` function |
+
+At boot, `loadConfig()` reads the `"lang"` key from NVS and calls `i18nInit(cfg.lang)`, which sets the global pointer `L` to the correct struct. All web handlers use `L->field` to retrieve translated text.
+
+### Adding a new language
+
+1. Create `src/i18n/fr.hpp` (or the target ISO code) by copying the structure of `en.hpp`.
+2. Rename the struct to `LANG_FR` and translate all fields.
+3. In `src/i18n/i18n.hpp`:
+   - Add `#include "fr.hpp"`.
+   - Add `else if (strncmp(lang, "fr", 2) == 0) L = &LANG_FR;` inside `i18nInit()`.
+4. In `src/proxy_operativo.hpp`, add the `fr` option to the language `<select>` in `handleWebConfig()` and validate it in `handleWebConfigSave()`.
+5. Compile and test.
+
+No web handler logic needs to be modified. The complete contract of required fields is defined in `src/i18n/strings.hpp`.
 
 ---
 

@@ -11,6 +11,7 @@
 #include "secrets.h"   // Valores default del primer arranque — EXCLUIDO DE GIT
 #include <esp_wifi.h>
 #include <esp_log.h>
+#include "i18n/i18n.hpp"
 
 // ====================================================================
 // CONFIGURACIÓN PERSISTENTE EN NVS (Non-Volatile Storage)
@@ -32,6 +33,7 @@ struct AppConfig {
     char   subnet[16]       = DEFAULT_SUBNET;      // <- secrets.h
     char   dns[16]          = DEFAULT_DNS;         // <- secrets.h
     char   otaPassword[32]  = DEFAULT_OTA_PASSWORD;    // <- secrets.h
+    char   lang[3]          = "es";
 };
 
 AppConfig cfg;
@@ -55,7 +57,9 @@ void loadConfig() {
     prefs.getString("subnet",    cfg.subnet,      sizeof(cfg.subnet));
     prefs.getString("dns",       cfg.dns,         sizeof(cfg.dns));
     prefs.getString("otaPass",   cfg.otaPassword, sizeof(cfg.otaPassword));
+    prefs.getString("lang",      cfg.lang,        sizeof(cfg.lang));
     prefs.end();
+    i18nInit(cfg.lang);
 }
 
 void saveConfig() {
@@ -72,6 +76,7 @@ void saveConfig() {
     prefs.putString("subnet",     cfg.subnet);
     prefs.putString("dns",        cfg.dns);
     prefs.putString("otaPass",    cfg.otaPassword);
+    prefs.putString("lang",       cfg.lang);
     prefs.putBool("runSetup", false);
     prefs.end();
 }
@@ -92,7 +97,7 @@ const uint8_t  MODBUS_FIXED_ID = 0;
 const uint16_t MODBUS_TEST_REG = 30000;
 const uint32_t RECONNECT_DELAY = 100;
 
-const String FIRMWARE_VERSION = "5.1.0";
+const String FIRMWARE_VERSION = "6.0-0";
 // ====================================================================
 
 // Máquina de estados extendida
@@ -462,9 +467,10 @@ String buildNavBar(const String &activePage) {
         return s;
     };
 
-    nav += navLink("/",       "Dashboard",     "dashboard");
-    nav += navLink("/log",    "Log Modbus",    "log");
-    nav += navLink("/config", "Configuracion", "config");
+    nav += navLink("/",       L->nav_dashboard, "dashboard");
+    nav += navLink("/log",    L->nav_log,       "log");
+    nav += navLink("/config", L->nav_config,    "config");
+    nav += "<span style='margin-left:auto;color:#4da6ff;font-size:12px;opacity:0.7;'>v" + FIRMWARE_VERSION + "</span>";
     nav += "</nav>";
     return nav;
 }
@@ -473,17 +479,24 @@ String buildNavBar(const String &activePage) {
 // REBOOT: reinicia el ESP32 desde la web
 // ====================================================================
 void handleReboot() {
-    String html = F("<!DOCTYPE html><html lang='es'><head><meta charset='UTF-8'>");
+    String html = "<!DOCTYPE html><html lang='";
+    html += L->html_lang;
+    html += F("'><head><meta charset='UTF-8'>");
     html += F("<meta name='viewport' content='width=device-width,initial-scale=1.0'>");
     html += F("<meta http-equiv='refresh' content='8;url=/'>");
-    html += F("<title>Reiniciando...</title>");
+    html += "<title>";
+    html += L->reboot_title;
+    html += F("</title>");
     html += F("<style>body{background:#121212;color:#fff;font-family:sans-serif;");
     html += F("text-align:center;padding-top:12%;}h1{color:#17a2b8;}</style>");
     html += F("</head><body>");
-    html += F("<h1>&#128260; Reiniciando...</h1>");
-    html += F("<p>El dispositivo se esta reiniciando.</p>");
-    html += F("<p style='color:#888;font-size:13px;'>Seras redirigido al Dashboard en 8 segundos.</p>");
-    html += F("</body></html>");
+    html += "<h1>";
+    html += L->reboot_h1;
+    html += "</h1><p>";
+    html += L->reboot_msg;
+    html += "</p><p style='color:#888;font-size:13px;'>";
+    html += L->reboot_redirect;
+    html += F("</p></body></html>");
     webServer.send(200, "text/html", html);
     delay(1000);
     ESP.restart();
@@ -525,18 +538,21 @@ void handleFactoryReset() {
 
     Serial.println("[CFG] Factory Reset solicitado. Reiniciando en modo Setup...");
 
-    String html = "<!DOCTYPE html><html lang='es'><head><meta charset='UTF-8'>";
+    String html = "<!DOCTYPE html><html lang='";
+    html += L->html_lang;
+    html += "'><head><meta charset='UTF-8'>";
     html += "<meta name='viewport' content='width=device-width,initial-scale=1.0'>";
-    html += "<title>Factory Reset - Proxy Modbus</title>";
     html += "<style>body{background:#121212;color:#fff;font-family:sans-serif;";
     html += "text-align:center;padding-top:12%;}h1{color:#f39c12;}</style>";
-    html += "</head><body>";
-    html += "<h1>&#128260; Entrando en Modo Setup</h1>";
-    html += "<p>El dispositivo se esta reiniciando...</p>";
-    html += "<p style='color:#888;font-size:13px;'>Conectate al punto de acceso WiFi <strong>modbusproxy-";
+    html += "</head><body><h1>";
+    html += L->factory_h1;
+    html += "</h1><p>";
+    html += L->factory_msg;
+    html += "</p><p style='color:#888;font-size:13px;'>";
+    html += L->factory_hint_pre;
     html += FIRMWARE_VERSION;
-    html += "</strong> para configurar el dispositivo.</p>";
-    html += "</body></html>";
+    html += L->factory_hint_post;
+    html += "</p></body></html>";
 
     webServer.send(200, "text/html", html);
     delay(1500);
@@ -562,224 +578,264 @@ String htmlEscape(const char* s) {
 }
 
 void handleWebConfig() {
-    String html = "<!DOCTYPE html><html lang='es'><head><meta charset='UTF-8'>";
+    String html = "<!DOCTYPE html><html lang='";
+    html += L->html_lang;
+    html += "'><head><meta charset='UTF-8'>";
     html += "<meta name='viewport' content='width=device-width, initial-scale=1.0'>";
-    html += "<title>Configuracion - Proxy Modbus</title>";
-    html += "<style>";
-    html += "*{box-sizing:border-box;}";
-    html += "body{background:#121212;color:#e0e0e0;font-family:'Segoe UI',sans-serif;margin:0;padding:0;}";
-    html += ".wrap{max-width:700px;margin:20px auto;padding:0 16px 40px;}";
-    html += "h1{color:#4da6ff;border-bottom:1px solid #333;padding-bottom:8px;margin-top:0;}";
-    html += "h3{color:#a0c4ff;border-bottom:1px solid #222;padding-bottom:6px;margin-top:28px;}";
-    html += ".form-group{margin-bottom:18px;}";
-    html += "label{display:block;font-size:13px;color:#aaa;margin-bottom:5px;font-weight:600;}";
-    html += "input[type=text],input[type=password],input[type=number]";
-    html += "{width:100%;padding:9px 12px;background:#1e1e1e;border:1px solid #333;";
-    html += "color:#e0e0e0;border-radius:5px;font-size:14px;}";
-    html += "input:focus{outline:none;border-color:#4da6ff;";
-    html += "box-shadow:0 0 0 2px rgba(77,166,255,0.2);}";
-    html += ".radio-group{display:flex;gap:20px;margin-top:4px;}";
-    html += ".radio-group label{display:flex;align-items:center;gap:6px;font-size:14px;";
-    html += "color:#e0e0e0;font-weight:400;cursor:pointer;}";
-    html += ".section-note{font-size:12px;color:#666;margin-top:4px;}";
-    html += ".btn-save{display:block;width:100%;padding:12px;background:#28a745;color:#fff;";
-    html += "border:none;border-radius:6px;font-size:16px;font-weight:700;cursor:pointer;margin-top:28px;}";
-    html += ".btn-save:hover{background:#1e8035;}";
-    html += ".warn{background:#3d2f00;border:1px solid #f39c12;color:#ffe082;";
-    html += "padding:12px 16px;border-radius:6px;margin-bottom:20px;font-size:14px;}";
-    html += ".btn-scan{padding:8px 16px;background:#17a2b8;color:#fff;border:none;";
-    html += "border-radius:5px;font-size:13px;font-weight:600;cursor:pointer;margin-bottom:8px;}";
-    html += ".btn-scan:disabled{opacity:.6;cursor:wait;}";
-    html += ".btn-scan:hover:not(:disabled){background:#138496;}";
-    html += "#netList{border-radius:5px;overflow:hidden;border:1px solid #2a2a2a;margin-bottom:10px;}";
-    html += "#netList:empty{display:none;}";
-    html += ".net-item{padding:9px 14px;background:#1a1a1a;border-bottom:1px solid #2a2a2a;";
-    html += "cursor:pointer;display:flex;align-items:center;gap:10px;}";
-    html += ".net-item:last-child{border-bottom:none;}";
-    html += ".net-item:hover,.net-item.sel{background:#1e3a5a;}";
-    html += ".net-sig{min-width:52px;letter-spacing:1px;}";
-    html += ".net-ssid{flex:1;font-size:14px;}";
-    html += ".net-dbm{font-size:11px;color:#666;white-space:nowrap;}";
-    html += ".scan-msg{padding:9px 14px;color:#888;font-size:13px;font-style:italic;}";
-    html += "</style></head><body>";
+    html += "<title>";
+    html += L->cfg_title;
+    html += "</title><style>";
+    html += F("*{box-sizing:border-box;}");
+    html += F("body{background:#121212;color:#e0e0e0;font-family:'Segoe UI',sans-serif;margin:0;padding:0;}");
+    html += F(".wrap{max-width:700px;margin:20px auto;padding:0 16px 40px;}");
+    html += F("h1{color:#4da6ff;border-bottom:1px solid #333;padding-bottom:8px;margin-top:0;}");
+    html += F("h3{color:#a0c4ff;border-bottom:1px solid #222;padding-bottom:6px;margin-top:28px;}");
+    html += F(".form-group{margin-bottom:18px;}");
+    html += F("label{display:block;font-size:13px;color:#aaa;margin-bottom:5px;font-weight:600;}");
+    html += F("input[type=text],input[type=password],input[type=number],select");
+    html += F("{width:100%;padding:9px 12px;background:#1e1e1e;border:1px solid #333;");
+    html += F("color:#e0e0e0;border-radius:5px;font-size:14px;}");
+    html += F("input:focus,select:focus{outline:none;border-color:#4da6ff;");
+    html += F("box-shadow:0 0 0 2px rgba(77,166,255,0.2);}");
+    html += F(".radio-group{display:flex;gap:20px;margin-top:4px;}");
+    html += F(".radio-group label{display:flex;align-items:center;gap:6px;font-size:14px;");
+    html += F("color:#e0e0e0;font-weight:400;cursor:pointer;}");
+    html += F(".section-note{font-size:12px;color:#666;margin-top:4px;}");
+    html += F(".btn-save{display:block;width:100%;padding:12px;background:#28a745;color:#fff;");
+    html += F("border:none;border-radius:6px;font-size:16px;font-weight:700;cursor:pointer;margin-top:28px;}");
+    html += F(".btn-save:hover{background:#1e8035;}");
+    html += F(".warn{background:#3d2f00;border:1px solid #f39c12;color:#ffe082;");
+    html += F("padding:12px 16px;border-radius:6px;margin-bottom:20px;font-size:14px;}");
+    html += F(".btn-scan{padding:8px 16px;background:#17a2b8;color:#fff;border:none;");
+    html += F("border-radius:5px;font-size:13px;font-weight:600;cursor:pointer;margin-bottom:8px;}");
+    html += F(".btn-scan:disabled{opacity:.6;cursor:wait;}");
+    html += F(".btn-scan:hover:not(:disabled){background:#138496;}");
+    html += F("#netList{border-radius:5px;overflow:hidden;border:1px solid #2a2a2a;margin-bottom:10px;}");
+    html += F("#netList:empty{display:none;}");
+    html += F(".net-item{padding:9px 14px;background:#1a1a1a;border-bottom:1px solid #2a2a2a;");
+    html += F("cursor:pointer;display:flex;align-items:center;gap:10px;}");
+    html += F(".net-item:last-child{border-bottom:none;}");
+    html += F(".net-item:hover,.net-item.sel{background:#1e3a5a;}");
+    html += F(".net-sig{min-width:52px;letter-spacing:1px;}");
+    html += F(".net-ssid{flex:1;font-size:14px;}");
+    html += F(".net-dbm{font-size:11px;color:#666;white-space:nowrap;}");
+    html += F(".scan-msg{padding:9px 14px;color:#888;font-size:13px;font-style:italic;}");
+    html += F("</style></head><body>");
     html += buildNavBar("config");
-    html += "<div class='wrap'>";
-    html += "<h1>&#9881; Configuracion del Proxy</h1>";
-    html += "<div class='warn'>&#9888; Los cambios se aplican en el <strong>siguiente reinicio</strong>. ";
-    html += "El dispositivo se reiniciara automaticamente al guardar.</div>";
+    html += "<div class='wrap'><h1>";
+    html += L->cfg_h1;
+    html += "</h1><div class='warn'>";
+    html += L->cfg_warn;
+    html += "</div>";
 
     html += "<form method='POST' action='/config/save'>";
 
     // ---- SECCIÓN: INTERFAZ DE RED ----
-    html += "<h3>Interfaz de Red</h3>";
-
-    html += "<div class='form-group'>";
-    html += "<label>Tipo de conexion</label>";
-    html += "<div class='radio-group'>";
+    html += "<h3>";
+    html += L->cfg_h3_net;
+    html += "</h3><div class='form-group'><label>";
+    html += L->cfg_conn_type;
+    html += "</label><div class='radio-group'>";
     html += "<label><input type='radio' name='useEth' value='0'";
     html += (!cfg.useEthernet ? " checked" : "");
-    html += "> WiFi (inalambrico)</label>";
-    html += "<label><input type='radio' name='useEth' value='1'";
+    html += "> ";
+    html += L->cfg_wifi;
+    html += "</label><label><input type='radio' name='useEth' value='1'";
     html += (cfg.useEthernet ? " checked" : "");
-    html += "> Ethernet (cable RJ45)</label>";
-    html += "</div></div>";
+    html += "> ";
+    html += L->cfg_ethernet;
+    html += "</label></div></div>";
 
-    html += "<div class='form-group'>";
-    html += "<label>Asignacion de IP</label>";
-    html += "<div class='radio-group'>";
+    html += "<div class='form-group'><label>";
+    html += L->cfg_ip_assign;
+    html += "</label><div class='radio-group'>";
     html += "<label><input type='radio' name='useDHCP' value='0'";
     html += (!cfg.useDHCP ? " checked" : "");
-    html += "> IP Estatica</label>";
-    html += "<label><input type='radio' name='useDHCP' value='1'";
+    html += "> ";
+    html += L->cfg_static;
+    html += "</label><label><input type='radio' name='useDHCP' value='1'";
     html += (cfg.useDHCP ? " checked" : "");
-    html += "> DHCP (automatica)</label>";
-    html += "</div></div>";
+    html += "> ";
+    html += L->cfg_dhcp;
+    html += "</label></div></div>";
 
-    html += "<div class='form-group'>";
-    html += "<label>Rotar pantalla OLED 180 grados</label>";
-    html += "<div class='radio-group'>";
+    html += "<div class='form-group'><label>";
+    html += L->cfg_rotate;
+    html += "</label><div class='radio-group'>";
     html += "<label><input type='radio' name='rotScr' value='0'";
     html += (!cfg.rotateScreen ? " checked" : "");
-    html += "> No</label>";
-    html += "<label><input type='radio' name='rotScr' value='1'";
+    html += "> ";
+    html += L->cfg_rotate_no;
+    html += "</label><label><input type='radio' name='rotScr' value='1'";
     html += (cfg.rotateScreen ? " checked" : "");
-    html += "> Si</label>";
-    html += "</div></div>";
+    html += "> ";
+    html += L->cfg_rotate_yes;
+    html += "</label></div></div>";
 
     // ---- SECCIÓN: CREDENCIALES WIFI ----
-    html += "<h3>Credenciales WiFi</h3>";
-    html += "<p class='section-note'>Solo se usan si la conexion seleccionada es WiFi.</p>";
+    html += "<h3>";
+    html += L->cfg_h3_wifi;
+    html += "</h3><p class='section-note'>";
+    html += L->cfg_wifi_note;
+    html += "</p><div class='form-group'><label>";
+    html += L->cfg_available_nets;
+    html += "</label><button type='button' class='btn-scan' id='scanBtn' onclick='doScan()'>";
+    html += L->cfg_scan_btn;
+    html += "</button><div id='netList'></div></div>";
 
-    html += "<div class='form-group'>";
-    html += "<label>Redes WiFi disponibles</label>";
-    html += "<button type='button' class='btn-scan' id='scanBtn' onclick='doScan()'>Escanear redes WiFi</button>";
-    html += "<div id='netList'></div>";
-    html += "</div>";
-
-    html += "<div class='form-group'>";
-    html += "<label for='wifiSSID'>SSID (selecciona arriba o escribe manualmente)</label>";
-    html += "<input type='text' id='wifiSSID' name='wifiSSID' maxlength='63' value='";
+    html += "<div class='form-group'><label for='wifiSSID'>";
+    html += L->cfg_ssid;
+    html += "</label><input type='text' id='wifiSSID' name='wifiSSID' maxlength='63' value='";
     html += htmlEscape(cfg.wifiSSID);
     html += "'></div>";
 
-    html += "<div class='form-group'>";
-    html += "<label for='wifiPass'>Contrasena WiFi</label>";
-    html += "<input type='password' id='wifiPass' name='wifiPass' maxlength='63' value='";
+    html += "<div class='form-group'><label for='wifiPass'>";
+    html += L->cfg_pass;
+    html += "</label><input type='password' id='wifiPass' name='wifiPass' maxlength='63' value='";
     html += htmlEscape(cfg.wifiPass);
     html += "'></div>";
 
     // ---- SECCIÓN: DESTINO MODBUS ----
-    html += "<h3>Destino Modbus TCP (EMMA / Inversor)</h3>";
-
-    html += "<div class='form-group'>";
-    html += "<label for='modbusIP'>IP del servidor Modbus</label>";
-    html += "<input type='text' id='modbusIP' name='modbusIP' maxlength='15' value='";
+    html += "<h3>";
+    html += L->cfg_h3_modbus;
+    html += "</h3><div class='form-group'><label for='modbusIP'>";
+    html += L->cfg_modbus_ip;
+    html += "</label><input type='text' id='modbusIP' name='modbusIP' maxlength='15' value='";
     html += htmlEscape(cfg.modbusIP);
     html += "'></div>";
 
-    html += "<div class='form-group'>";
-    html += "<label for='modbusPort'>Puerto Modbus TCP</label>";
-    html += "<input type='number' id='modbusPort' name='modbusPort' min='1' max='65535' value='";
+    html += "<div class='form-group'><label for='modbusPort'>";
+    html += L->cfg_modbus_port;
+    html += "</label><input type='number' id='modbusPort' name='modbusPort' min='1' max='65535' value='";
     html += String(cfg.modbusPort);
     html += "'></div>";
 
     // ---- SECCIÓN: RED ESTÁTICA ----
-    html += "<h3>Red Estatica del Proxy</h3>";
-    html += "<p class='section-note'>Solo se usa si la asignacion de IP es Estatica.</p>";
+    html += "<h3>";
+    html += L->cfg_h3_static;
+    html += "</h3><p class='section-note'>";
+    html += L->cfg_static_note;
+    html += "</p>";
 
-    html += "<div class='form-group'>";
-    html += "<label for='localIP'>IP del Proxy (este dispositivo)</label>";
-    html += "<input type='text' id='localIP' name='localIP' maxlength='15' value='";
+    html += "<div class='form-group'><label for='localIP'>";
+    html += L->cfg_proxy_ip;
+    html += "</label><input type='text' id='localIP' name='localIP' maxlength='15' value='";
     html += htmlEscape(cfg.localIP);
     html += "'></div>";
 
-    html += "<div class='form-group'>";
-    html += "<label for='gw'>Puerta de enlace (Gateway)</label>";
-    html += "<input type='text' id='gw' name='gw' maxlength='15' value='";
+    html += "<div class='form-group'><label for='gw'>";
+    html += L->cfg_gateway;
+    html += "</label><input type='text' id='gw' name='gw' maxlength='15' value='";
     html += htmlEscape(cfg.gateway);
     html += "'></div>";
 
-    html += "<div class='form-group'>";
-    html += "<label for='sn'>Mascara de subred (Subnet)</label>";
-    html += "<input type='text' id='sn' name='sn' maxlength='15' value='";
+    html += "<div class='form-group'><label for='sn'>";
+    html += L->cfg_subnet;
+    html += "</label><input type='text' id='sn' name='sn' maxlength='15' value='";
     html += htmlEscape(cfg.subnet);
     html += "'></div>";
 
-    html += "<div class='form-group'>";
-    html += "<label for='dns'>DNS primario</label>";
-    html += "<input type='text' id='dns' name='dns' maxlength='15' value='";
+    html += "<div class='form-group'><label for='dns'>";
+    html += L->cfg_dns;
+    html += "</label><input type='text' id='dns' name='dns' maxlength='15' value='";
     html += htmlEscape(cfg.dns);
     html += "'></div>";
 
     // ---- SECCIÓN: OTA ----
-    html += "<h3>Actualizacion OTA</h3>";
-
-    html += "<div class='form-group'>";
-    html += "<label for='otaPass'>Contrasena OTA</label>";
-    html += "<input type='password' id='otaPass' name='otaPass' maxlength='31' value='";
+    html += "<h3>";
+    html += L->cfg_h3_ota;
+    html += "</h3><div class='form-group'><label for='otaPass'>";
+    html += L->cfg_ota_pass;
+    html += "</label><input type='password' id='otaPass' name='otaPass' maxlength='31' value='";
     html += htmlEscape(cfg.otaPassword);
     html += "'></div>";
 
-    html += "<button type='submit' class='btn-save'>&#128190; Guardar y Reiniciar</button>";
-    html += "</form>";
+    // ---- SECCIÓN: IDIOMA ----
+    html += "<h3>";
+    html += L->cfg_h3_lang;
+    html += "</h3><div class='form-group'><label for='lang'>Idioma / Language</label>";
+    html += "<select id='lang' name='lang'>";
+    html += "<option value='es'";
+    html += (strncmp(cfg.lang, "es", 2) == 0 ? " selected" : "");
+    html += ">Espa&ntilde;ol</option>";
+    html += "<option value='en'";
+    html += (strncmp(cfg.lang, "en", 2) == 0 ? " selected" : "");
+    html += ">English</option>";
+    html += "<option value='de'";
+    html += (strncmp(cfg.lang, "de", 2) == 0 ? " selected" : "");
+    html += ">Deutsch</option>";
+    html += "</select></div>";
+
+    html += "<button type='submit' class='btn-save'>";
+    html += L->cfg_save_btn;
+    html += "</button></form>";
 
     // ---- REBOOT ----
-    html += "<hr style='border:none;border-top:1px solid #333;margin:32px 0 20px;'>";
-    html += "<form method='POST' action='/reboot'>";
+    html += F("<hr style='border:none;border-top:1px solid #333;margin:32px 0 20px;'>");
+    html += F("<form method='POST' action='/reboot'>");
     html += "<button type='submit' style='display:block;width:100%;padding:11px;background:#17a2b8;";
     html += "color:#fff;border:none;border-radius:6px;font-size:15px;font-weight:700;cursor:pointer;'>";
-    html += "&#128260; Reiniciar dispositivo</button>";
-    html += "</form>";
+    html += L->cfg_reboot_btn;
+    html += "</button></form>";
 
     // ---- ZONA DE PELIGRO: Factory Reset ----
-    html += "<hr style='border:none;border-top:1px solid #333;margin:24px 0 24px;'>";
-    html += "<h3 style='color:#dc3545;'>&#9888; Zona de Peligro</h3>";
-    html += "<div class='warn'>El <strong>Factory Reset</strong> hace que el proximo arranque entre en ";
-    html += "<strong>Modo Setup</strong>. El dispositivo levantara un AP WiFi abierto llamado ";
-    html += "<strong>modbusproxy-";
+    html += F("<hr style='border:none;border-top:1px solid #333;margin:24px 0 24px;'>");
+    html += "<h3 style='color:#dc3545;'>";
+    html += L->cfg_danger_h3;
+    html += "</h3><div class='warn'>";
+    html += L->cfg_danger_desc_pre;
     html += FIRMWARE_VERSION;
-    html += "</strong> desde el que podras reconfigurarlo. ";
-    html += "La configuracion actual se conserva en memoria hasta que guardes en el Setup.</div>";
-    html += "<form method='POST' action='/factory-reset' ";
-    html += "onsubmit='return confirm(\"\\u00BFEntrar en Modo Setup? El dispositivo se reiniciara y levantara un AP WiFi para reconfigurarse.\")'>";
+    html += L->cfg_danger_desc_post;
+    html += "</div><form method='POST' action='/factory-reset' onsubmit='return confirm(\"";
+    html += L->cfg_factory_confirm;
+    html += "\")'>";
     html += "<button type='submit' style='display:block;width:100%;padding:12px;background:#dc3545;";
     html += "color:#fff;border:none;border-radius:6px;font-size:15px;font-weight:700;cursor:pointer;'>";
-    html += "&#128260; Factory Reset (Entrar en Modo Setup)</button>";
-    html += "</form>";
+    html += L->cfg_factory_btn;
+    html += "</button></form>";
 
     // ---- JavaScript: scan WiFi ----
     html += "<script>";
-    html += "function sigBars(r){";
-    html += "var b=r>=-50?4:r>=-65?3:r>=-75?2:1;";
-    html += "var c=b>=3?'#28a745':b==2?'#f39c12':'#dc3545';";
-    html += "var s='';for(var i=0;i<4;i++)s+='<span style=\"color:'+(i<b?c:'#333')+'\">&#9646;</span>';";
-    html += "return s;}";
-    html += "function doScan(){";
-    html += "var btn=document.getElementById('scanBtn');";
-    html += "var lst=document.getElementById('netList');";
-    html += "btn.disabled=true;btn.textContent='Escaneando...';";
-    html += "lst.innerHTML='<div class=\"scan-msg\">Buscando redes...</div>';";
-    html += "fetch('/wifi-scan')";
-    html += ".then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.json();})";
-    html += ".then(function(nets){";
-    html += "lst.innerHTML='';";
-    html += "if(!nets||!nets.length){lst.innerHTML='<div class=\"scan-msg\">Sin redes encontradas.</div>';return;}";
-    html += "nets.forEach(function(n){";
-    html += "var d=document.createElement('div');d.className='net-item';";
-    html += "var lock=n.enc?'&#128274;':'&#128275;';";
-    html += "d.innerHTML='<span class=\"net-sig\">'+sigBars(n.rssi)+'</span>'";
-    html += "+'<span class=\"net-ssid\">'+n.ssid+'</span>'";
-    html += "+'<span>'+lock+'</span>'";
-    html += "+'<span class=\"net-dbm\">'+n.rssi+'&nbsp;dBm</span>';";
-    html += "(function(s){d.onclick=function(){";
-    html += "document.querySelectorAll('.net-item').forEach(function(x){x.classList.remove('sel');});";
-    html += "d.classList.add('sel');";
-    html += "document.getElementById('wifiSSID').value=s;";
-    html += "document.getElementById('wifiPass').focus();";
-    html += "};})(n.ssid);";
-    html += "lst.appendChild(d);});})";
-    html += ".catch(function(e){lst.innerHTML='<div class=\"scan-msg\">Error: '+e.message+'</div>';})";
-    html += ".finally(function(){btn.disabled=false;btn.textContent='Escanear redes WiFi';});";
+    html += F("function sigBars(r){");
+    html += F("var b=r>=-50?4:r>=-65?3:r>=-75?2:1;");
+    html += F("var c=b>=3?'#28a745':b==2?'#f39c12':'#dc3545';");
+    html += F("var s='';for(var i=0;i<4;i++)s+='<span style=\"color:'+(i<b?c:'#333')+'\">&#9646;</span>';");
+    html += F("return s;}");
+    html += F("function doScan(){");
+    html += F("var btn=document.getElementById('scanBtn');");
+    html += F("var lst=document.getElementById('netList');");
+    html += "btn.disabled=true;btn.textContent='";
+    html += L->cfg_js_scanning;
+    html += "';lst.innerHTML='<div class=\"scan-msg\">";
+    html += L->cfg_js_searching;
+    html += "</div>';";
+    html += F("fetch('/wifi-scan')");
+    html += F(".then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.json();})");
+    html += F(".then(function(nets){");
+    html += F("lst.innerHTML='';");
+    html += "if(!nets||!nets.length){lst.innerHTML='<div class=\"scan-msg\">";
+    html += L->cfg_js_no_nets;
+    html += "</div>';return;}";
+    html += F("nets.forEach(function(n){");
+    html += F("var d=document.createElement('div');d.className='net-item';");
+    html += F("var lock=n.enc?'&#128274;':'&#128275;';");
+    html += F("d.innerHTML='<span class=\"net-sig\">'+sigBars(n.rssi)+'</span>'");
+    html += F("+'<span class=\"net-ssid\">'+n.ssid+'</span>'");
+    html += F("+'<span>'+lock+'</span>'");
+    html += F("+'<span class=\"net-dbm\">'+n.rssi+'&nbsp;dBm</span>';");
+    html += F("(function(s){d.onclick=function(){");
+    html += F("document.querySelectorAll('.net-item').forEach(function(x){x.classList.remove('sel');});");
+    html += F("d.classList.add('sel');");
+    html += F("document.getElementById('wifiSSID').value=s;");
+    html += F("document.getElementById('wifiPass').focus();");
+    html += F("};})(n.ssid);");
+    html += F("lst.appendChild(d);});})");
+    html += ".catch(function(e){lst.innerHTML='<div class=\"scan-msg\">";
+    html += L->cfg_js_error;
+    html += "'+e.message+'</div>';})";
+    html += ".finally(function(){btn.disabled=false;btn.textContent='";
+    html += L->cfg_scan_btn;
+    html += "';});";
     html += "}";
     html += "</script>";
 
@@ -824,22 +880,33 @@ void handleWebConfigSave() {
     val = webServer.arg("otaPass"); val.trim();
     if (val.length() > 0) strncpy(cfg.otaPassword, val.c_str(), sizeof(cfg.otaPassword) - 1);
 
+    val = webServer.arg("lang"); val.trim();
+    if (val == "en" || val == "de" || val == "es") {
+        strncpy(cfg.lang, val.c_str(), sizeof(cfg.lang) - 1);
+        cfg.lang[sizeof(cfg.lang) - 1] = '\0';
+        i18nInit(cfg.lang);
+    }
+
     saveConfig();
     Serial.println("[CFG] Configuracion guardada en NVS. Reiniciando...");
 
     // Responder al navegador antes del reinicio
-    String html = "<!DOCTYPE html><html lang='es'><head><meta charset='UTF-8'>";
+    String html = "<!DOCTYPE html><html lang='";
+    html += L->html_lang;
+    html += "'><head><meta charset='UTF-8'>";
     html += "<meta name='viewport' content='width=device-width, initial-scale=1.0'>";
     html += "<meta http-equiv='refresh' content='6;url=/'>"; // Redirige al dashboard tras 6s
-    html += "<title>Guardando...</title>";
-    html += "<style>body{background:#121212;color:#fff;font-family:sans-serif;";
+    html += "<title>";
+    html += L->cfg_saved_title;
+    html += "</title><style>body{background:#121212;color:#fff;font-family:sans-serif;";
     html += "text-align:center;padding-top:15%;}h1{color:#28a745;}</style>";
-    html += "</head><body>";
-    html += "<h1>&#128190; Configuracion guardada</h1>";
-    html += "<p>El dispositivo se esta reiniciando...</p>";
-    html += "<p style='color:#888;font-size:13px;'>";
-    html += "Seras redirigido al Dashboard en 6 segundos.</p>";
-    html += "</body></html>";
+    html += "</head><body><h1>";
+    html += L->cfg_saved_h1;
+    html += "</h1><p>";
+    html += L->cfg_saved_msg;
+    html += "</p><p style='color:#888;font-size:13px;'>";
+    html += L->cfg_saved_redirect;
+    html += "</p></body></html>";
     webServer.send(200, "text/html", html);
 
     delay(1500); // Tiempo para que el navegador reciba la respuesta
@@ -850,107 +917,143 @@ void handleWebConfigSave() {
 // MOTOR DEL SERVIDOR WEB HTTP Y API
 // ====================================================================
 void handleWebRoot() {
-    String html = "<!DOCTYPE html><html lang='es'><head><meta charset='UTF-8'>";
+    String html = "<!DOCTYPE html><html lang='";
+    html += L->html_lang;
+    html += "'><head><meta charset='UTF-8'>";
     html += "<meta name='viewport' content='width=device-width, initial-scale=1.0'>";
-    html += "<meta http-equiv='refresh' content='5'>"; 
-    html += "<title>Dashboard - Proxy Modbus</title>";
-    html += "<style>";
-    html += "*{box-sizing:border-box;}";
-    html += "body{background-color:#121212;color:#e0e0e0;font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;margin:0;padding:0;}";
-    html += ".container{max-width:860px;margin:20px auto;background-color:#1e1e1e;padding:20px;border-radius:10px;box-shadow:0 4px 6px rgba(0,0,0,0.3);}";
-    html += "h1{color:#4da6ff;border-bottom:1px solid #333;padding-bottom:10px;margin-top:0;}";
-    html += "table{width:100%;border-collapse:collapse;margin-top:20px;margin-bottom:30px;}";
-    html += "th,td{border:1px solid #333;padding:12px;text-align:center;}";
-    html += "th{background-color:#2d2d2d;color:#4da6ff;}";
-    html += "tr:nth-child(even){background-color:#1a1a1a;}";
-    html += ".status{font-weight:bold;padding:5px 10px;border-radius:5px;}";
-    html += ".btn-danger{display:inline-block;background-color:#dc3545;color:white;padding:10px 20px;text-decoration:none;border-radius:5px;font-weight:bold;border:none;cursor:pointer;}";
-    html += ".btn-danger:hover{background-color:#c82333;}";
-    html += "code{background-color:#111;padding:4px 8px;border-radius:3px;font-family:monospace;font-size:14px;display:inline-block;word-break:break-all;}";
-    html += "</style></head><body>";
+    html += F("<meta http-equiv='refresh' content='5'>");
+    html += "<title>";
+    html += L->dash_title;
+    html += "</title><style>";
+    html += F("*{box-sizing:border-box;}");
+    html += F("body{background-color:#121212;color:#e0e0e0;font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;margin:0;padding:0;}");
+    html += F(".container{max-width:860px;margin:20px auto;background-color:#1e1e1e;padding:20px;border-radius:10px;box-shadow:0 4px 6px rgba(0,0,0,0.3);}");
+    html += F("h1{color:#4da6ff;border-bottom:1px solid #333;padding-bottom:10px;margin-top:0;}");
+    html += F("table{width:100%;border-collapse:collapse;margin-top:20px;margin-bottom:30px;}");
+    html += F("th,td{border:1px solid #333;padding:12px;text-align:center;}");
+    html += F("th{background-color:#2d2d2d;color:#4da6ff;}");
+    html += F("tr:nth-child(even){background-color:#1a1a1a;}");
+    html += F(".status{font-weight:bold;padding:5px 10px;border-radius:5px;}");
+    html += F(".btn-danger{display:inline-block;background-color:#dc3545;color:white;padding:10px 20px;text-decoration:none;border-radius:5px;font-weight:bold;border:none;cursor:pointer;}");
+    html += F(".btn-danger:hover{background-color:#c82333;}");
+    html += F("code{background-color:#111;padding:4px 8px;border-radius:3px;font-family:monospace;font-size:14px;display:inline-block;word-break:break-all;}");
+    html += F("</style></head><body>");
     html += buildNavBar("dashboard");
-    
-    html += "<div class='container'>";
-    html += "<h1>📊 Monitor Proxy Modbus (HA)</h1>";
+
+    html += "<div class='container'><h1>";
+    html += L->dash_h1;
+    html += "</h1>";
 
     String stateColor = "#888";
     String stateStr = "WAITING";
-    if (currentBackendState == BK_STANDBY) { stateStr = "STANDBY"; stateColor = "#f39c12"; }
-    else if (currentBackendState == BK_CONNECTED) { stateStr = "CONNECTED"; stateColor = "#28a745"; }
-    else if (currentBackendState == BK_CON_ERR) { stateStr = "CON-ERR"; stateColor = "#dc3545"; }
+    if (currentBackendState == BK_STANDBY)      { stateStr = "STANDBY";    stateColor = "#f39c12"; }
+    else if (currentBackendState == BK_CONNECTED)   { stateStr = "CONNECTED";  stateColor = "#28a745"; }
+    else if (currentBackendState == BK_CON_ERR)     { stateStr = "CON-ERR";    stateColor = "#dc3545"; }
     else if (currentBackendState == BK_STARTUP_PING) { stateStr = "PINGING..."; stateColor = "#17a2b8"; }
-    else if (currentBackendState == BK_PING_ERR) { stateStr = "PING ERROR"; stateColor = "#dc3545"; }
-    else if (currentBackendState == BK_PAUSED) { stateStr = "PAUSED"; stateColor = "#6c757d"; }
-    else if (currentBackendState == BK_SHUTDOWN) { stateStr = "APAGADO"; stateColor = "#dc3545"; } 
+    else if (currentBackendState == BK_PING_ERR)    { stateStr = "PING ERROR"; stateColor = "#dc3545"; }
+    else if (currentBackendState == BK_PAUSED)      { stateStr = "PAUSED";     stateColor = "#6c757d"; }
+    else if (currentBackendState == BK_SHUTDOWN)    { stateStr = L->dash_state_shutdown; stateColor = "#dc3545"; }
 
     int activeSockets = getActiveClientCount();
     int totalTracked = 0;
     for (int i = 0; i < MAX_TRACKED_IPS; i++) if (trackedClients[i].isUsed) totalTracked++;
 
-    html += "<h3>Estado del Servidor</h3>";
-    html += "<p>Túnel hacia EMMA: <span class='status' style='background-color: " + stateColor + "; color: #fff;'>" + stateStr + "</span></p>";
-    
+    html += "<h3>";
+    html += L->dash_h3_status;
+    html += "</h3><p>";
+    html += L->dash_tunnel;
+    html += "<span class='status' style='background-color: " + stateColor + "; color: #fff;'>" + stateStr + "</span></p>";
+
     bool ocultarModelWeb = (currentBackendState == BK_PAUSED || currentBackendState == BK_PING_ERR || currentBackendState == BK_STARTUP_PING || currentBackendState == BK_SHUTDOWN);
     String displayModelWeb = ocultarModelWeb ? "" : emmaDeviceModel;
-    html += "<p>Dispositivo Identificado: <strong>" + displayModelWeb + "</strong></p>"; 
-    html += "<p>Conexiones TCP Activas: <strong>" + String(activeSockets) + " / " + String(MAX_CLIENTS) + "</strong></p>";
+    html += "<p>";
+    html += L->dash_device;
+    html += "<strong>" + displayModelWeb + "</strong></p>";
+    html += "<p>";
+    html += L->dash_connections;
+    html += "<strong>" + String(activeSockets) + " / " + String(MAX_CLIENTS) + "</strong></p>";
 
     if (checkEmmaStartup && currentBackendState != BK_SHUTDOWN) {
-        html += "<h3>🔍 Depuración del Primado Inicial (Modbus ID 0)</h3>";
-        html += "<div style='background-color: #252525; padding: 15px; border-radius: 5px; border-left: 5px solid #f39c12; margin-bottom: 25px;'>";
-        html += "<p>Total de Intentos: <strong>" + String(emmaDebugAttempts) + "</strong></p>";
-        html += "<p>Fase de Control: <strong>" + emmaDebugStage + "</strong></p>";
-        html += "<p>Trama Enviada (Hex): <code style='color: #4da6ff;'>" + emmaDebugHexSent + "</code></p>";
-        html += "<p>Trama Recibida (Hex): <code style='color: #28a745;'>" + emmaDebugHexReceived + "</code></p>";
-        html += "<p>Último Diagnóstico: <strong style='color: #ff4d4d;'>" + emmaDebugError + "</strong></p>";
-        html += "</div>";
+        html += "<h3>";
+        html += L->dash_h3_debug;
+        html += "</h3>";
+        html += F("<div style='background-color: #252525; padding: 15px; border-radius: 5px; border-left: 5px solid #f39c12; margin-bottom: 25px;'>");
+        html += "<p>";
+        html += L->dash_attempts;
+        html += "<strong>" + String(emmaDebugAttempts) + "</strong></p><p>";
+        html += L->dash_phase;
+        html += "<strong>" + emmaDebugStage + "</strong></p><p>";
+        html += L->dash_sent;
+        html += "<code style='color: #4da6ff;'>" + emmaDebugHexSent + "</code></p><p>";
+        html += L->dash_recv;
+        html += "<code style='color: #28a745;'>" + emmaDebugHexReceived + "</code></p><p>";
+        html += L->dash_diag;
+        html += "<strong style='color: #ff4d4d;'>" + emmaDebugError + "</strong></p></div>";
     }
 
-    html += "<h3>Historial de IPs Clientes</h3>";
-    html += "<table><tr><th>Dirección IP</th><th>Total Peticiones</th><th>Última Petición</th></tr>";
-    
+    html += "<h3>";
+    html += L->dash_h3_clients;
+    html += "</h3><table><tr><th>";
+    html += L->dash_col_ip;
+    html += "</th><th>";
+    html += L->dash_col_req;
+    html += "</th><th>";
+    html += L->dash_col_last;
+    html += "</th></tr>";
+
     uint32_t currentUptime = millis() / 1000;
     if (totalTracked == 0) {
-        html += "<tr><td colspan='3'>No hay clientes registrados todavía.</td></tr>";
+        html += "<tr><td colspan='3'>";
+        html += L->dash_no_clients;
+        html += "</td></tr>";
     } else {
         for (int i = 0; i < MAX_TRACKED_IPS; i++) {
             if (trackedClients[i].isUsed) {
                 uint32_t elapsed = currentUptime - trackedClients[i].lastRequestTimestamp;
-                html += "<tr>";
-                html += "<td>" + trackedClients[i].ip.toString() + "</td>";
+                char timeBuf[40];
+                snprintf(timeBuf, sizeof(timeBuf), L->dash_time_ago_fmt, (unsigned long)elapsed);
+                html += "<tr><td>" + trackedClients[i].ip.toString() + "</td>";
                 html += "<td>" + String(trackedClients[i].requestCount) + "</td>";
-                html += "<td>Hace " + String(elapsed) + " segundos</td>";
-                html += "</tr>";
+                html += "<td>" + String(timeBuf) + "</td></tr>";
             }
         }
     }
     html += "</table>";
-    
+
     if (currentBackendState != BK_SHUTDOWN) {
-        html += "<a href='/apagar' class='btn-danger'>🛑 Apagar Proxy de Forma Segura</a>";
+        html += "<a href='/apagar' class='btn-danger'>";
+        html += L->dash_shutdown_btn;
+        html += "</a>";
     } else {
-        html += "<p style='color: #dc3545; font-weight: bold;'>Dispositivo en modo pasivo seguro. Listo para desconectar o actualizar por red.</p>";
+        html += "<p style='color: #dc3545; font-weight: bold;'>";
+        html += L->dash_passive_msg;
+        html += "</p>";
     }
     html += "</div></body></html>";
-    
+
     webServer.send(200, "text/html", html);
 }
 
 void handleWebShutdown() {
-    String html = "<!DOCTYPE html><html lang='es'><head><meta charset='UTF-8'>";
+    String html = "<!DOCTYPE html><html lang='";
+    html += L->html_lang;
+    html += "'><head><meta charset='UTF-8'>";
     html += "<meta name='viewport' content='width=device-width, initial-scale=1.0'>";
-    html += "<title>Apagando - Proxy Modbus</title>";
-    html += "<style>*{box-sizing:border-box;}body{background-color:#121212;color:#fff;";
-    html += "font-family:sans-serif;margin:0;padding:0;}";
-    html += ".container{max-width:600px;margin:40px auto;text-align:center;";
-    html += "background:#1e1e1e;padding:30px;border-radius:10px;}</style>";
-    html += "</head><body>";
+    html += "<title>";
+    html += L->shutdown_title;
+    html += F("</title><style>*{box-sizing:border-box;}body{background-color:#121212;color:#fff;");
+    html += F("font-family:sans-serif;margin:0;padding:0;}");
+    html += F(".container{max-width:600px;margin:40px auto;text-align:center;");
+    html += F("background:#1e1e1e;padding:30px;border-radius:10px;}</style>");
+    html += F("</head><body>");
     html += buildNavBar("dashboard");
-    html += "<div class='container'>";
-    html += "<h1 style='color:#dc3545;'>APAGADO INICIADO</h1>";
-    html += "<p>El puerto TCP ha sido liberado en la EMMA.</p>";
-    html += "<p>El Dashboard Web y el servicio OTA continuarán operativos de fondo.</p>";
-    html += "</div></body></html>";
+    html += "<div class='container'><h1 style='color:#dc3545;'>";
+    html += L->shutdown_h1;
+    html += "</h1><p>";
+    html += L->shutdown_msg1;
+    html += "</p><p>";
+    html += L->shutdown_msg2;
+    html += "</p></div></body></html>";
     
     webServer.send(200, "text/html", html);
     pendingShutdown = true; 
@@ -987,10 +1090,14 @@ void handleApiStatus() {
 // PÁGINA WEB: LOG DE TRANSACCIONES MODBUS
 // ====================================================================
 void handleWebLog() {
-    String html = "<!DOCTYPE html><html lang='es'><head><meta charset='UTF-8'>";
+    String html = "<!DOCTYPE html><html lang='";
+    html += L->html_lang;
+    html += "'><head><meta charset='UTF-8'>";
     html += "<meta name='viewport' content='width=device-width, initial-scale=1.0'>";
     html += "<meta http-equiv='refresh' content='30'>";
-    html += "<title>Log Modbus - Proxy</title>";
+    html += "<title>";
+    html += L->log_title;
+    html += "</title>";
     html += "<style>";
     html += "*{box-sizing:border-box;}";
     html += "body{background:#121212;color:#e0e0e0;font-family:'Segoe UI',sans-serif;margin:0;padding:0;}";
@@ -1015,31 +1122,45 @@ void handleWebLog() {
     html += ".info{color:#888;font-size:13px;}";
     html += "</style></head><body>";
     html += buildNavBar("log");
-    html += "<div class='wrap'>";
-    html += "<h1>Log de Transacciones Modbus</h1>";
+    html += "<div class='wrap'><h1>";
+    html += L->log_h1;
+    html += "</h1>";
 
     // Toolbar
     html += "<div class='toolbar'>";
     if (xSemaphoreTake(txLogMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
-        html += "<span class='info'>Entradas: <strong>" + String(txLogCount) + " / " + String(MAX_TX_LOG) + "</strong></span>";
+        html += "<span class='info'>";
+        html += L->log_entries;
+        html += "<strong>" + String(txLogCount) + " / " + String(MAX_TX_LOG) + "</strong></span>";
         xSemaphoreGive(txLogMutex);
     }
-    html += "<a href='/log.csv' class='btn btn-blue'>&#11015; Exportar CSV</a>";
-    html += "<span class='info' style='margin-left:auto;'>Auto-refresco: 30s</span>";
-    html += "</div>";
+    html += "<a href='/log.csv' class='btn btn-blue'>";
+    html += L->log_export_csv;
+    html += "</a><span class='info' style='margin-left:auto;'>";
+    html += L->log_autorefresh;
+    html += "</span></div>";
 
     // Cabecera de tabla
-    html += "<table><tr>";
-    html += "<th>#</th><th>Tiempo(s)</th><th>Origen</th><th>Destino</th>";
-    html += "<th>Unit ID</th><th>Función</th><th>Registro</th><th>Cant.</th>";
-    html += "<th>Request</th><th>Response</th><th>Excepción</th>";
-    html += "<th>Bytes Request (HEX)</th><th>Bytes Response (HEX)</th>";
-    html += "</tr>";
+    html += "<table><tr><th>";
+    html += L->log_col_num;  html += "</th><th>";
+    html += L->log_col_time; html += "</th><th>";
+    html += L->log_col_src;  html += "</th><th>";
+    html += L->log_col_dst;  html += "</th><th>";
+    html += L->log_col_unit; html += "</th><th>";
+    html += L->log_col_func; html += "</th><th>";
+    html += L->log_col_reg;  html += "</th><th>";
+    html += L->log_col_qty;  html += "</th><th>";
+    html += L->log_col_req;  html += "</th><th>";
+    html += L->log_col_resp; html += "</th><th>";
+    html += L->log_col_exc;  html += "</th><th>";
+    html += L->log_col_req_hex;  html += "</th><th>";
+    html += L->log_col_resp_hex; html += "</th></tr>";
 
     if (xSemaphoreTake(txLogMutex, pdMS_TO_TICKS(200)) == pdTRUE) {
         if (txLogCount == 0) {
             html += "<tr><td colspan='13' style='text-align:center;color:#666;padding:20px;'>";
-            html += "Sin transacciones registradas todavía.</td></tr>";
+            html += L->log_no_entries;
+            html += "</td></tr>";
         } else {
             // Iterar en orden cronológico inverso (más reciente primero)
             for (int n = 0; n < txLogCount; n++) {
@@ -1109,7 +1230,8 @@ void handleWebLog() {
         xSemaphoreGive(txLogMutex);
     } else {
         html += "<tr><td colspan='13' style='text-align:center;color:#f5b8b8;'>";
-        html += "Error al acceder al log (mutex ocupado).</td></tr>";
+        html += L->log_mutex_err;
+        html += "</td></tr>";
     }
 
     html += "</table></div></body></html>";
