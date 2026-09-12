@@ -1,4 +1,4 @@
-# 🔋 ESP32 Modbus TCP Proxy & Multiplexer for Huawei EMMA & SUN2000 (v5.0.0)
+# 🔋 ESP32 Modbus TCP Proxy & Multiplexer for Huawei EMMA & SUN2000 (v6.0-0)
 
 Este repositorio contiene el firmware de grado industrial desarrollado para **ESP32** (optimizado para conexión por cable físico mediante la pila Ethernet nativa del chip LAN8720 en placas WT32-ETH01, o mediante su antena WiFi interna). El dispositivo actúa como un **escudo de red, proxy transparente bajo demanda (On-Demand) y multiplexor de canales Modbus TCP**.
 
@@ -80,6 +80,25 @@ Edita `src/secrets.h`:
 
 ---
 
+### Flujo de despliegue recomendado
+
+Antes de actualizar producción, verificar siempre el nuevo firmware en el entorno de test:
+
+```bash
+# 1. Apuntar secrets.h al entorno de test (emulador + IP .213) y subir
+pio run -e TEST_ota -t upload
+
+# 2. Verificar que el proxy de test arranca y conecta con el emulador
+curl http://192.168.254.213/api/status
+
+# 3. Solo si todo va bien: apuntar secrets.h a producción (EMMA real + IP .211) y subir
+pio run -e PROD_ota -t upload
+```
+
+> **Regla:** nunca actualizar producción sin haber probado antes la misma versión en test.
+
+---
+
 ### 2. `secrets.ini` — Contraseña OTA e IPs de upload (PlatformIO)
 
 Necesario para subir firmware por OTA con los perfiles `PROD_ota` y `TEST_ota`.
@@ -134,7 +153,14 @@ SERVIDORES = {
 
 ## 🚀 Historial de Versiones y Novedades
 
-### 🟢 Versión 4.0.0 (Actual)
+### 🟢 Versión 6.0-0 (Actual)
+
+* **Interfaz web multilingüe (i18n):** La interfaz web del proxy ahora soporta múltiples idiomas de forma dinámica. El usuario puede seleccionar el idioma en la página de Configuración sin necesidad de recompilar el firmware. El idioma elegido se guarda en la NVS del ESP32 y persiste entre reinicios.
+* **Idiomas incluidos:** Español (por defecto), English e Deutsch. Los tres idiomas cubren el 100 % de los textos de la interfaz: portal de setup, dashboard, log Modbus, página de configuración, página de apagado y página de reinicio.
+* **Arquitectura de traducción basada en structs C++:** Todas las cadenas de texto se almacenan en flash (`.rodata`) dentro de structs `const LangStrings` — cero overhead de RAM. El selector activo es un puntero global `L` que se establece en el arranque mediante `i18nInit(cfg.lang)`.
+* **Extensible por la comunidad:** Añadir un idioma nuevo consiste en crear un único archivo `.hpp` bajo `src/i18n/` siguiendo la plantilla de `strings.hpp`, incluirlo en `i18n.hpp` y añadir el caso correspondiente en `i18nInit()`. No requiere tocar los handlers web.
+
+### 🟡 Versión 4.0.0
 
 * **Actualizaciones Inalámbricas Permanentes (OTA):** Inclusión de la pila `ArduinoOTA` en el puerto de red `3232`. Permite flashear nuevas versiones del código a través del cable Ethernet o WiFi de forma remota. Cuenta con una pantalla de carga dedicada en el OLED local que muestra la barra de progreso en tiempo real (`UPDATING (OTA)`) y verificación final de éxito (`SUCCESS!!`).
 * **Seguridad Blindada (Anti-Git):** Sistema de doble autenticación inalámbrica protegido contra filtraciones en repositorios públicos. La contraseña viaja cifrada mediante inyección local en PlatformIO combinando un archivo `secrets.ini` (oculto en `.gitignore`) con las directivas de preprocesador de `secrets.h`.
@@ -164,7 +190,7 @@ El comportamiento completo de la placa y la pila de red se administra mediante v
 * `MODBUS_FIXED_ID` (`const uint8_t`): Identificador de Unidad (Unit ID) utilizado para el test de arranque y primado inicial (Por defecto `0`, correspondiente a la EMMA).
 * `MODBUS_TEST_REG` (`const uint16_t`): Dirección del registro Modbus consultado durante el test de vida del arranque (`30000`, Model Name ASCII).
 * `RECONNECT_DELAY` (`const uint32_t`): Tiempo de espera en milisegundos (`5000` ms) que aplica el proxy antes de reintentar una conexión contra el puerto 502 de Huawei si el socket se rompe, evitando baneos por reintentos infinitos en ráfaga (Anti-DDoS).
-* `FIRMWARE_VERSION` (`const String`): Almacena la versión semántica del programa activo que se renderizará de forma centrada en el menú local.
+* `FIRMWARE_VERSION` (`const String`): Almacena la versión semántica del programa activo que se renderizará de forma centrada en el menú local. También se usa como sufijo del nombre del AP WiFi en Modo Setup (`modbusproxy-<version>`).
 
 ---
 
@@ -319,7 +345,7 @@ Para la carga inicial del firmware o recuperación de emergencia usando un progr
 
 ## 🧙 Configuración Inicial — Modo Setup
 
-A partir de la versión 5.0.0 el dispositivo incluye un **asistente de configuración inicial** que evita tener que editar `secrets.h` y recompilar para cada instalación nueva.
+A partir de la versión 5.0.0 el dispositivo incluye un **asistente de configuración inicial** que evita tener que editar `secrets.h` y recompilar para cada instalación nueva. En la versión 6.0-0 el portal de setup también está disponible en los tres idiomas soportados.
 
 ### ¿Cómo funciona?
 
@@ -338,7 +364,7 @@ Cuando la NVS está vacía (dispositivo recién flasheado o flash borrada), `run
 
 Al entrar en Modo Setup el ESP32:
 
-1. Levanta un **punto de acceso WiFi abierto** con el nombre `modbusproxy-5.0.0` (sin contraseña).
+1. Levanta un **punto de acceso WiFi abierto** con el nombre `modbusproxy-6.0-0` (sin contraseña).
 2. Asigna la IP `192.168.1.1` a su propia interfaz.
 3. Cualquier dispositivo que se conecte a esa WiFi y abra un navegador es **redirigido automáticamente** a la página de configuración (portal cautivo — funciona igual que los WiFi de hoteles).
 4. El asistente permite configurar:
@@ -365,7 +391,7 @@ Si todavía tienes acceso a la interfaz web del proxy:
 1. Abre `http://<IP_del_proxy>/config` en el navegador.
 2. Baja hasta la sección **Zona de Peligro**.
 3. Pulsa **Factory Reset (Entrar en Modo Setup)** y confirma.
-4. El dispositivo reinicia y levanta el AP `modbusproxy-5.0.0`.
+4. El dispositivo reinicia y levanta el AP `modbusproxy-6.0-0`.
 
 ---
 
@@ -454,6 +480,44 @@ const bool SETUP_NEEDED = false;
 ```
 
 Si la pones a `true` y borras la NVS antes de flashear (o usas `flash.py` con la opción de forzar Setup), el dispositivo entrará en Modo Setup. Una vez que el usuario completa la configuración, `runSetup` se escribe a `false` en la NVS y el dispositivo arranca normalmente en los siguientes reinicios — aunque `SETUP_NEEDED` siga siendo `true` en el código.
+
+---
+
+## 🌍 Soporte Multilingüe (i18n)
+
+A partir de la versión 6.0-0, la interfaz web del proxy es completamente multilingüe. El idioma se selecciona desde la página de Configuración del dispositivo (`/config`) y se guarda de forma persistente en la NVS del ESP32.
+
+### Idiomas disponibles
+
+| Código | Idioma | Archivo |
+|---|---|---|
+| `es` | Español (por defecto) | `src/i18n/es.hpp` |
+| `en` | English | `src/i18n/en.hpp` |
+| `de` | Deutsch | `src/i18n/de.hpp` |
+
+### Arquitectura técnica
+
+Toda la lógica i18n se concentra en `src/i18n/`:
+
+| Archivo | Propósito |
+|---|---|
+| `strings.hpp` | Define el struct `LangStrings` con todos los campos que debe rellenar cada idioma |
+| `es.hpp` / `en.hpp` / `de.hpp` | Una instancia `static const LangStrings LANG_XX` por idioma, almacenada en flash |
+| `i18n.hpp` | Incluye los tres idiomas, define el puntero activo `L` y la función `i18nInit(lang)` |
+
+En el arranque, `loadConfig()` lee la clave `"lang"` de la NVS y llama a `i18nInit(cfg.lang)`, que ajusta el puntero global `L` al struct correcto. Todos los handlers web usan `L->campo` para obtener el texto traducido.
+
+### Añadir un idioma nuevo
+
+1. Crea `src/i18n/fr.hpp` (o el código ISO del idioma) copiando la estructura de `en.hpp`.
+2. Cambia el nombre del struct a `LANG_FR` y traduce todos los campos.
+3. En `src/i18n/i18n.hpp`:
+   - Añade `#include "fr.hpp"`.
+   - Añade `else if (strncmp(lang, "fr", 2) == 0) L = &LANG_FR;` en `i18nInit()`.
+4. En `src/proxy_operativo.hpp`, añade la opción `fr` en el `<select>` de idioma de `handleWebConfig()` y valídala en `handleWebConfigSave()`.
+5. Compila y prueba.
+
+No hace falta tocar ningún handler web ni la lógica del proxy. El contrato completo de campos requeridos está en `src/i18n/strings.hpp`.
 
 ---
 

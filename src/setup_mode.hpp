@@ -40,9 +40,13 @@ static void handleSetupSave();
 static void handleSetupRoot() {
     String apName = "modbusproxy-" + FIRMWARE_VERSION;
 
-    String html = F("<!DOCTYPE html><html lang='es'><head><meta charset='UTF-8'>");
+    String html = "<!DOCTYPE html><html lang='";
+    html += L->html_lang;
+    html += "'><head><meta charset='UTF-8'>";
     html += F("<meta name='viewport' content='width=device-width,initial-scale=1.0'>");
-    html += "<title>Setup - Proxy Modbus v";
+    html += "<title>";
+    html += L->setup_page_title;
+    html += " v";
     html += FIRMWARE_VERSION;
     html += F("</title><style>");
     html += F("*{box-sizing:border-box;}");
@@ -87,99 +91,115 @@ static void handleSetupRoot() {
 
     // Header
     html += F("<div style='background:#1a1a2e;padding:10px 20px;border-bottom:2px solid #4da6ff;'>");
-    html += F("<span style='color:#4da6ff;font-weight:700;font-size:15px;'>&#9641; PROXY MODBUS &mdash; Configuracion Inicial v");
+    html += "<span style='color:#4da6ff;font-weight:700;font-size:15px;'>";
+    html += L->setup_header;
+    html += " v";
     html += FIRMWARE_VERSION;
     html += F("</span></div>");
 
-    html += F("<div class='wrap'>");
-    html += F("<h1>&#9881; Asistente de Configuracion</h1>");
+    html += F("<div class='wrap'><h1>");
+    html += L->setup_h1;
+    html += F("</h1>");
 
-    html += F("<div class='info'>&#8505; Conectado al punto de acceso <strong>");
+    html += "<div class='info'>";
+    html += L->setup_info_1;
     html += apName;
-    html += F("</strong>. Configura la red y pulsa <strong>Guardar</strong>.</div>");
+    html += L->setup_info_2;
+    html += "</div>";
 
-    html += F("<div class='warn'>&#9888; Tras guardar, el dispositivo se reiniciara y se conectara a tu red. ");
-    html += F("Esta pagina dejara de estar disponible en esta IP.</div>");
+    html += "<div class='warn'>";
+    html += L->setup_warn;
+    html += "</div>";
 
     html += F("<form method='POST' action='/save' id='frm'>");
 
     // ---- Interfaz de red ----
-    html += F("<h3>Interfaz de Red</h3>");
-    html += F("<div class='form-group'><label class='lbl'>Tipo de conexion</label>");
-    html += F("<div class='radio-group'>");
+    html += "<h3>";
+    html += L->setup_h3_net;
+    html += "</h3><div class='form-group'><label class='lbl'>";
+    html += L->setup_conn_type;
+    html += F("</label><div class='radio-group'>");
     html += F("<label><input type='radio' name='useEth' value='0' checked id='r_wifi'");
-    html += F(" onchange='toggleIface()'> WiFi (inalambrico)</label>");
-    html += F("<label><input type='radio' name='useEth' value='1' id='r_eth'");
-    html += F(" onchange='toggleIface()'> Ethernet (cable RJ45)</label>");
-    html += F("</div></div>");
+    html += F(" onchange='toggleIface()'> ");
+    html += L->setup_wifi;
+    html += F("</label><label><input type='radio' name='useEth' value='1' id='r_eth'");
+    html += F(" onchange='toggleIface()'> ");
+    html += L->setup_ethernet;
+    html += F("</label></div></div>");
 
     // ---- Credenciales WiFi ----
-    html += F("<div id='wifiSection'>");
-    html += F("<h3>Credenciales WiFi</h3>");
+    html += F("<div id='wifiSection'><h3>");
+    html += L->setup_h3_wifi_creds;
+    html += F("</h3>");
 
-    // Boton de escaneo + lista de resultados
-    html += F("<div class='form-group'>");
-    html += F("<label class='lbl'>Redes WiFi disponibles</label>");
-    html += F("<button type='button' class='btn-scan' id='scanBtn' onclick='doScan()'>Escanear redes WiFi</button>");
-    html += F("<div id='netList'></div>");
-    html += F("</div>");
+    html += F("<div class='form-group'><label class='lbl'>");
+    html += L->setup_available_nets;
+    html += "</label><button type='button' class='btn-scan' id='scanBtn' onclick='doScan()'>";
+    html += L->setup_scan_btn;
+    html += F("</button><div id='netList'></div></div>");
 
-    // SSID (puede rellenarse al hacer click en la lista o escribirse a mano)
-    html += F("<div class='form-group'>");
-    html += F("<label class='lbl' for='wifiSSID'>SSID (selecciona arriba o escribe manualmente)</label>");
-    html += F("<input type='text' id='wifiSSID' name='wifiSSID' maxlength='63'");
-    html += F(" placeholder='Nombre exacto de la red WiFi'>");
-    html += F("</div>");
+    html += F("<div class='form-group'><label class='lbl' for='wifiSSID'>");
+    html += L->setup_ssid_label;
+    html += F("</label><input type='text' id='wifiSSID' name='wifiSSID' maxlength='63' placeholder='");
+    html += L->setup_ssid_placeholder;
+    html += F("'></div>");
 
-    html += F("<div class='form-group'>");
-    html += F("<label class='lbl' for='wifiPass'>Contrasena WiFi</label>");
-    html += F("<input type='password' id='wifiPass' name='wifiPass' maxlength='63'");
-    html += F(" placeholder='Deja vacio si la red es abierta'>");
-    html += F("</div>");
-    html += F("</div>"); // fin wifiSection
+    html += F("<div class='form-group'><label class='lbl' for='wifiPass'>");
+    html += L->setup_pass_label;
+    html += F("</label><input type='password' id='wifiPass' name='wifiPass' maxlength='63' placeholder='");
+    html += L->setup_pass_placeholder;
+    html += F("'></div></div>"); // fin wifiSection
 
     // ---- Asignacion de IP ----
-    html += F("<h3>Asignacion de IP del Proxy</h3>");
-    html += F("<div class='form-group'><label class='lbl'>Metodo de asignacion</label>");
-    html += F("<div class='radio-group'>");
+    html += "<h3>";
+    html += L->setup_h3_ip;
+    html += "</h3><div class='form-group'><label class='lbl'>";
+    html += L->setup_ip_method;
+    html += F("</label><div class='radio-group'>");
     html += F("<label><input type='radio' name='useDHCP' value='1' checked id='r_dhcp'");
-    html += F(" onchange='toggleDHCP()'> DHCP (automatica)</label>");
-    html += F("<label><input type='radio' name='useDHCP' value='0' id='r_static'");
-    html += F(" onchange='toggleDHCP()'> IP Estatica</label>");
-    html += F("</div></div>");
+    html += F(" onchange='toggleDHCP()'> ");
+    html += L->setup_dhcp;
+    html += F("</label><label><input type='radio' name='useDHCP' value='0' id='r_static'");
+    html += F(" onchange='toggleDHCP()'> ");
+    html += L->setup_static;
+    html += F("</label></div></div>");
 
     // ---- IP Estatica ----
     html += F("<div id='staticSection' style='display:none'>");
-    html += F("<div class='form-group'><label class='lbl' for='localIP'>IP del Proxy (este dispositivo)</label>");
-    html += "<input type='text' id='localIP' name='localIP' maxlength='15' value='";
+    html += F("<div class='form-group'><label class='lbl' for='localIP'>");
+    html += L->setup_proxy_ip;
+    html += "</label><input type='text' id='localIP' name='localIP' maxlength='15' value='";
     html += cfg.localIP;
-    html += F("'></div>");
-    html += F("<div class='form-group'><label class='lbl' for='gw'>Puerta de enlace (Gateway)</label>");
-    html += "<input type='text' id='gw' name='gw' maxlength='15' value='";
+    html += F("'></div><div class='form-group'><label class='lbl' for='gw'>");
+    html += L->setup_gateway;
+    html += "</label><input type='text' id='gw' name='gw' maxlength='15' value='";
     html += cfg.gateway;
-    html += F("'></div>");
-    html += F("<div class='form-group'><label class='lbl' for='sn'>Mascara de subred</label>");
-    html += "<input type='text' id='sn' name='sn' maxlength='15' value='";
+    html += F("'></div><div class='form-group'><label class='lbl' for='sn'>");
+    html += L->setup_subnet;
+    html += "</label><input type='text' id='sn' name='sn' maxlength='15' value='";
     html += cfg.subnet;
-    html += F("'></div>");
-    html += F("<div class='form-group'><label class='lbl' for='dns'>DNS primario</label>");
-    html += "<input type='text' id='dns' name='dns' maxlength='15' value='";
+    html += F("'></div><div class='form-group'><label class='lbl' for='dns'>");
+    html += L->setup_dns;
+    html += "</label><input type='text' id='dns' name='dns' maxlength='15' value='";
     html += cfg.dns;
-    html += F("'></div>");
-    html += F("</div>"); // fin staticSection
+    html += F("'></div></div>"); // fin staticSection
 
     // ---- Destino Modbus ----
-    html += F("<h3>Destino Modbus TCP (EMMA / Inversor)</h3>");
-    html += F("<div class='form-group'><label class='lbl' for='modbusIP'>IP del servidor Modbus</label>");
-    html += "<input type='text' id='modbusIP' name='modbusIP' maxlength='15' value='";
+    html += "<h3>";
+    html += L->setup_h3_modbus;
+    html += F("</h3><div class='form-group'><label class='lbl' for='modbusIP'>");
+    html += L->setup_modbus_ip;
+    html += "</label><input type='text' id='modbusIP' name='modbusIP' maxlength='15' value='";
     html += cfg.modbusIP;
-    html += F("'></div>");
-    html += F("<div class='form-group'><label class='lbl' for='modbusPort'>Puerto Modbus TCP</label>");
-    html += "<input type='number' id='modbusPort' name='modbusPort' min='1' max='65535' value='";
+    html += F("'></div><div class='form-group'><label class='lbl' for='modbusPort'>");
+    html += L->setup_modbus_port;
+    html += "</label><input type='number' id='modbusPort' name='modbusPort' min='1' max='65535' value='";
     html += String(cfg.modbusPort);
     html += F("'></div>");
 
-    html += F("<button type='submit' class='btn-save'>&#128190; Guardar y Reiniciar</button>");
+    html += "<button type='submit' class='btn-save'>";
+    html += L->setup_save_btn;
+    html += "</button>";
     html += F("</form>");
     html += F("</div>"); // fin wrap
 
@@ -209,8 +229,11 @@ static void handleSetupRoot() {
     html += F("function doScan(){");
     html += F("var btn=document.getElementById('scanBtn');");
     html += F("var lst=document.getElementById('netList');");
-    html += F("btn.disabled=true;btn.textContent='Escaneando...';");
-    html += F("lst.innerHTML='<div class=\"scan-msg\">Buscando redes, espera unos segundos...</div>';");
+    html += "btn.disabled=true;btn.textContent='";
+    html += L->setup_js_scanning;
+    html += "';lst.innerHTML='<div class=\"scan-msg\">";
+    html += L->setup_js_searching;
+    html += "</div>';";
     html += F("fetch('/scan')");
     html += F(".then(function(r){");
     html += F("if(!r.ok)throw new Error('HTTP '+r.status);");
@@ -218,8 +241,9 @@ static void handleSetupRoot() {
     html += F(".then(function(nets){");
     html += F("lst.innerHTML='';");
     html += F("if(!nets||nets.length===0){");
-    html += F("lst.innerHTML='<div class=\"scan-msg\">No se encontraron redes. Intenta de nuevo.</div>';");
-    html += F("return;}");
+    html += "lst.innerHTML='<div class=\"scan-msg\">";
+    html += L->setup_js_no_nets;
+    html += F("</div>';return;}");
     html += F("nets.forEach(function(n){");
     html += F("var d=document.createElement('div');");
     html += F("d.className='net-item';");
@@ -238,9 +262,13 @@ static void handleSetupRoot() {
     html += F("})(n.ssid);");
     html += F("lst.appendChild(d);});})");
     html += F(".catch(function(e){");
-    html += F("lst.innerHTML='<div class=\"scan-msg\">Error al escanear: '+e.message+'</div>';})");
+    html += "lst.innerHTML='<div class=\"scan-msg\">";
+    html += L->setup_js_error;
+    html += "'+e.message+'</div>';})";
     html += F(".finally(function(){");
-    html += F("btn.disabled=false;btn.textContent='Escanear redes WiFi';});");
+    html += "btn.disabled=false;btn.textContent='";
+    html += L->setup_scan_btn;
+    html += F("';});");
     html += F("}");
 
     html += F("</script></body></html>");
@@ -327,16 +355,21 @@ static void handleSetupSave() {
 
     Serial.println("[SETUP] Configuracion guardada. Reiniciando en modo proxy...");
 
-    String html = F("<!DOCTYPE html><html lang='es'><head><meta charset='UTF-8'>");
+    String html = "<!DOCTYPE html><html lang='";
+    html += L->html_lang;
+    html += F("'><head><meta charset='UTF-8'>");
     html += F("<meta name='viewport' content='width=device-width,initial-scale=1.0'>");
-    html += F("<title>Guardando...</title>");
-    html += F("<style>body{background:#121212;color:#fff;font-family:sans-serif;");
+    html += "<title>";
+    html += L->setup_saved_title;
+    html += F("</title><style>body{background:#121212;color:#fff;font-family:sans-serif;");
     html += F("text-align:center;padding-top:12%;}h1{color:#28a745;}</style>");
-    html += F("</head><body>");
-    html += F("<h1>&#128190; Configuracion guardada</h1>");
-    html += F("<p>El dispositivo se esta reiniciando en modo proxy...</p>");
-    html += F("<p style='color:#888;font-size:13px;'>Conectate a tu red habitual y accede al proxy por la IP configurada.</p>");
-    html += F("</body></html>");
+    html += F("</head><body><h1>");
+    html += L->setup_saved_h1;
+    html += "</h1><p>";
+    html += L->setup_saved_msg;
+    html += "</p><p style='color:#888;font-size:13px;'>";
+    html += L->setup_saved_hint;
+    html += F("</p></body></html>");
     setupWebServer.send(200, "text/html", html);
 
     delay(1500);
@@ -366,7 +399,7 @@ static void runSetupMode() {
     display.setCursor(0, 28);
     display.println("IP: 192.168.1.1");
     display.setCursor(0, 42);
-    display.println("Sin contrasena WiFi");
+    display.println(L->setup_oled_no_pass);
     display.display();
 
     // AP + STA para poder hacer scan de redes mientras el AP esta activo
